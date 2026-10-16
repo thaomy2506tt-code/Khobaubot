@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 25; versionName '3.5' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 26; versionName '3.6' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -179,7 +179,7 @@ jobs:
                   deadzoneRect?.let { dz ->
                       c.drawRect(dz, pDeadzoneFill)
                       c.drawRect(dz, pDeadzone)
-                      c.drawText("VÙNG NÉ (Bám theo Civice)", dz.left + 8f, dz.top + 24f, pTxt)
+                      c.drawText("VÙNG NÉ (Bám theo nhân vật)", dz.left + 8f, dz.top + 24f, pTxt)
                   }
 
                   tR?.let { r ->
@@ -223,13 +223,13 @@ jobs:
                   anchorX = sW / 2f; anchorY = sH / 2f
                   playerPos = PointF(anchorX, anchorY)
 
-                  val chId = "bot_v35"
+                  val chId = "bot_v36"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v3.5 Running").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(125, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(125, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v3.6 Running").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(126, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(126, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -273,35 +273,66 @@ jobs:
                   return lastBmp
               }
 
-              // TỰ ĐỘNG ĐỊNH VỊ TỌA ĐỘ CIVICE QUA LÔNG VŨ TÍM VÀ KHIÊN XANH
-              private fun detectPlayerPosition(scr: Bitmap): PointF? {
-                  val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
+              // THUẬT TOÁN QUÉT TÊN ĐA NĂNG: NHẬN DIỆN MỌI NICK CHO MỌI TÀI KHOẢN
+              private fun detectUniversalPlayer(scr: Bitmap, curX: Float, curY: Float): PointF? {
+                  val sc = 0.35f
+                  val sw = (scr.width * sc).toInt()
+                  val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
+                  val pxs = IntArray(sw * sh)
+                  bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
 
-                  val startY = (sh * 0.15f).toInt(); val endY = (sh * 0.85f).toInt()
-                  val startX = (sw * 0.15f).toInt(); val endX = (sw * 0.85f).toInt()
+                  val searchRadius = (160f * sc).toInt()
+                  val cX = (curX * sc).toInt().coerceIn(searchRadius, sw - searchRadius)
+                  val cY = (curY * sc).toInt().coerceIn(searchRadius, sh - searchRadius)
 
-                  var purpleSumX = 0L; var purpleSumY = 0L; var purpleCount = 0
+                  var bestX = -1
+                  var bestY = -1
+                  var maxStreak = 0
 
-                  for (y in startY until endY step 2) {
-                      for (x in startX until endX step 2) {
-                          val c = px[y * sw + x]
-                          val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                          // Lông vũ tím trên mũ Civice: B và R vượt trội so với G
-                          if (b > 185 && r > 150 && g in 110..185 && b > g + 35 && r > g + 15) {
-                              purpleSumX += x
-                              purpleSumY += y
-                              purpleCount++
+                  val minY = (cY - searchRadius).coerceAtLeast((sh * 0.12f).toInt())
+                  val maxY = (cY + searchRadius).coerceAtMost((sh * 0.88f).toInt())
+                  val minX = (cX - searchRadius).coerceAtLeast((sw * 0.10f).toInt())
+                  val maxX = (cX + searchRadius).coerceAtMost((sw * 0.90f).toInt())
+
+                  for (y in minY until maxY step 2) {
+                      var currentStreak = 0
+                      var streakStartX = 0
+                      for (x in minX until maxX) {
+                          val c = pxs[y * sw + x]
+                          val r = c shr 16 and 0xFF
+                          val g = c shr 8 and 0xFF
+                          val b = c and 0xFF
+
+                          // Dải màu vàng kem chữ tên người chơi: R, G cao, B trung bình, viền đen
+                          val isNameYellow = (r in 200..255 && g in 190..255 && b in 120..195 && abs(r - g) < 25 && r > b + 25)
+                          if (isNameYellow) {
+                              if (currentStreak == 0) streakStartX = x
+                              currentStreak++
+                          } else {
+                              if (currentStreak in 10..75) {
+                                  val upY = (y - 1).coerceAtLeast(0)
+                                  val downY = (y + 1).coerceAtMost(sh - 1)
+                                  val cUp = pxs[upY * sw + (streakStartX + currentStreak / 2)]
+                                  val cDown = pxs[downY * sw + (streakStartX + currentStreak / 2)]
+                                  val isBorderDark = ((cUp shr 16 and 0xFF) < 55) || ((cDown shr 16 and 0xFF) < 55)
+
+                                  if (isBorderDark && currentStreak > maxStreak) {
+                                      maxStreak = currentStreak
+                                      bestX = streakStartX + currentStreak / 2
+                                      bestY = y
+                                  }
+                              }
+                              currentStreak = 0
                           }
                       }
                   }
 
-                  if (purpleCount >= 3) {
-                      val pFeatherX = (purpleSumX / purpleCount) / sc
-                      val pFeatherY = (purpleSumY / purpleCount) / sc
-                      // Tâm người cưỡi ngựa nằm dưới lông vũ khoảng 1 ô đất
-                      return PointF(pFeatherX, pFeatherY + 1.05f * tileH)
+                  if (bestX != -1 && bestY != -1) {
+                      val realNameX = bestX / sc
+                      val realNameY = bestY / sc
+                      // Tâm người & ngựa nằm ngay dưới dòng tên khoảng 1.15 ô đất
+                      return PointF(realNameX, realNameY + 1.15f * tileH)
                   }
                   return null
               }
@@ -322,8 +353,8 @@ jobs:
                               val scr = getScreen()
                               if (scr == null) { delay(80); continue }
 
-                              // 1. CẬP NHẬT TỌA ĐỘ CIVICE THỜI GIAN THỰC
-                              val detected = detectPlayerPosition(scr)
+                              // 1. TỰ ĐỘNG ĐỊNH VỊ NHÂN VẬT ĐA TÀI KHOẢN THEO THỜI GIAN THỰC
+                              val detected = detectUniversalPlayer(scr, playerPos.x, playerPos.y)
                               if (detected != null) {
                                   playerPos = detected
                               }
@@ -331,7 +362,6 @@ jobs:
                               val px = playerPos.x
                               val py = playerPos.y
 
-                              // Khung né động bám dính theo Civice
                               val dzW = 1.15f * tileW
                               val dzTop = 1.3f * tileH
                               val dzBot = 1.4f * tileH
@@ -348,7 +378,7 @@ jobs:
                                   delay(320); continue
                               }
 
-                              // 3. TẦNG 1: QUÁI VẬT & BOSS
+                              // 3. TẦNG 1: QUÁI VẬT & BOSS CÓ THANH MÁU ĐỎ
                               val mPt = findMonsterSafe(scr, px, py)
                               if (mPt != null) {
                                   val mBox = RectF(mPt.x - 26f, mPt.y - 10f, mPt.x + 26f, mPt.y + 44f)
@@ -360,7 +390,7 @@ jobs:
                                   delay(280); continue
                               }
 
-                              // 4. TẦNG 2: TÌM Ô ĐẤT / ĐÁ / RÊU THEO VỊ TRÍ CIVICE
+                              // 4. TẦNG 2: TÌM VÀ ĐẬP Ô ĐẤT / ĐÁ / RÊU
                               var tPt: PointF? = null
                               if (savedTileX != null && savedTileY != null) {
                                   val sx = savedTileX!!; val sy = savedTileY!!
@@ -383,9 +413,8 @@ jobs:
                                   FloatingService.inst?.updateHUD(null, RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f), statsTxt, deadRect, PointF(px, py))
                                   val distToTarget = hypot((tPt.x - px).toDouble(), (tPt.y - py).toDouble()).toFloat()
 
-                                  // ĐIỀU KIỆN ĐẾN ĐÍCH CHUẨN XÁC: SO SÁNH CIVICE VỚI Ô ĐẤT
+                                  // ĐÃ BƯỚC ĐẾN SÁT Ô ĐẤT: THẢ JOYSTICK ĐỨNG ĐẬP VỠ
                                   if (distToTarget <= (tileW * 0.65f)) {
-                                      // Đã đứng sát ô đất: Thả tay đập vỡ
                                       delay(260)
                                   } else {
                                       BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 280)
@@ -482,7 +511,6 @@ jobs:
                   return grassCount < 4 && tileCount >= 2
               }
 
-              // QUÉT TÌM Ô ĐẤT GẦN NHẤT SO VỚI TỌA ĐỘ THỰC CỦA CIVICE
               private fun findNearestTileDynamic(scr: Bitmap, px: Float, py: Float): PointF? {
                   val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
@@ -678,5 +706,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v3.5-APK
+          name: KhobauBot-v3.6-APK
           path: app/build/outputs/apk/debug/*.apk
