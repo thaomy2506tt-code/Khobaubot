@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Tao Cau Hinh
+      - name: Build All KhobauBot
         run: |
           mkdir -p app/src/main/java/com/bot app/src/main/res/xml
           echo "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }; dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }; rootProject.name = 'Khobaubot'; include ':app'" > settings.gradle
@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 13; versionName '2.3' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 14; versionName '2.4' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -67,8 +67,7 @@ jobs:
               </application>
           </manifest>
           EOF
-                - name: Tao Code va Build APK
-        run: |
+
           cat << 'EOF' > app/src/main/java/com/bot/App.kt
           package com.bot
 
@@ -182,7 +181,7 @@ jobs:
                   inst = this
                   val dm = resources.displayMetrics; sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.22f; joyY = sH * 0.75f
-                  val chId = "bot_v23"
+                  val chId = "bot_v24"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
@@ -461,5 +460,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v2.3-APK
+          name: KhobauBot-v2.4-APK
           path: app/build/outputs/apk/debug/*.apk
