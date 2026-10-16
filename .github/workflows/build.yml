@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 24; versionName '3.4' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 25; versionName '3.5' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -139,21 +139,20 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
-              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, cx: Float, cy: Float, dMs: Long = 320) {
-                  val angle = atan2((ty - cy).toDouble(), (tx - cx).toDouble())
+              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, px: Float, py: Float, dMs: Long = 320) {
+                  val angle = atan2((ty - py).toDouble(), (tx - px).toDouble())
                   val p = Path().apply { moveTo(jx, jy); lineTo(jx + (130f * cos(angle)).toFloat(), jy + (130f * sin(angle)).toFloat()) }
                   dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, dMs)).build(), null, null)
               }
           }
 
-          // LỚP VẼ HUD HIỂN THỊ THÔNG SỐ VÙNG NÉ VÀ TỌA ĐỘ PIXEL
           class TrackingOverlayView(ctx: Context) : View(ctx) {
               var isHudVisible = true
               private var mR: RectF? = null
               private var tR: RectF? = null
               private var targetStats: String = ""
               private var deadzoneRect: RectF? = null
-              private var centerPt: PointF? = null
+              private var playerPt: PointF? = null
               private var hue = 0f
 
               private val pBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3.5f; isAntiAlias = true }
@@ -162,11 +161,11 @@ jobs:
                   pathEffect = DashPathEffect(floatArrayOf(12f, 10f), 0f); isAntiAlias = true
               }
               private val pDeadzoneFill = Paint().apply { style = Paint.Style.FILL; color = Color.parseColor("#18FFD600"); isAntiAlias = true }
-              private val pCenter = Paint().apply { style = Paint.Style.FILL; color = Color.CYAN; isAntiAlias = true }
+              private val pPlayer = Paint().apply { style = Paint.Style.FILL; color = Color.CYAN; isAntiAlias = true }
               private val pTxt = Paint().apply { textSize = 21f; isFakeBoldText = true; isAntiAlias = true; setShadowLayer(3f, 1f, 1f, Color.BLACK); color = Color.WHITE }
 
-              fun update(m: RectF?, t: RectF?, stats: String, dz: RectF?, cp: PointF?) {
-                  mR = m; tR = t; targetStats = stats; deadzoneRect = dz; centerPt = cp
+              fun update(m: RectF?, t: RectF?, stats: String, dz: RectF?, pp: PointF?) {
+                  mR = m; tR = t; targetStats = stats; deadzoneRect = dz; playerPt = pp
                   hue = (hue + 16f) % 360f; postInvalidate()
               }
 
@@ -174,17 +173,15 @@ jobs:
                   super.onDraw(c)
                   if (!isHudVisible) return
 
-                  // 1. Vẽ Tâm Nhân Vật & Khung Vùng Né (Deadzone)
-                  centerPt?.let { pt ->
-                      c.drawCircle(pt.x, pt.y, 6f, pCenter)
+                  playerPt?.let { pt ->
+                      c.drawCircle(pt.x, pt.y, 7f, pPlayer)
                   }
                   deadzoneRect?.let { dz ->
                       c.drawRect(dz, pDeadzoneFill)
                       c.drawRect(dz, pDeadzone)
-                      c.drawText("VÙNG NÉ (Bóng & Ngựa)", dz.left + 8f, dz.top + 24f, pTxt)
+                      c.drawText("VÙNG NÉ (Bám theo Civice)", dz.left + 8f, dz.top + 24f, pTxt)
                   }
 
-                  // 2. Vẽ Ô Đập kèm Tọa độ pixel (dx, dy)
                   tR?.let { r ->
                       val col = Color.HSVToColor(floatArrayOf(hue, 0.9f, 1f))
                       pBox.color = col; c.drawRoundRect(r, 6f, 6f, pBox)
@@ -192,7 +189,6 @@ jobs:
                       c.drawText("• Ô ĐẬP $targetStats", r.left, ty, pTxt)
                   }
 
-                  // 3. Vẽ Quái
                   mR?.let { r ->
                       pBox.color = Color.parseColor("#FF1744"); c.drawRoundRect(r, 6f, 6f, pBox)
                       val ty = if (r.top - 8f > 30f) r.top - 8f else 30f
@@ -206,7 +202,9 @@ jobs:
               private var mp: MediaProjection? = null
               private var reader: ImageReader? = null
               private var lastBmp: Bitmap? = null
-              var joyX = 250f; var joyY = 850f; var offsetX = 0f; var offsetY = 0f
+              var joyX = 250f; var joyY = 850f
+              private var anchorX = 0f; private var anchorY = 0f
+              private var playerPos = PointF(360f, 640f)
               private var savedTileX: Float? = null; private var savedTileY: Float? = null
               private var running = false; private var job: Job? = null
               private var sW = 720; private var sH = 1280
@@ -214,7 +212,7 @@ jobs:
               private val tileW get() = sW / 12f
               private val tileH get() = sH / 18f
               private val maxSafeX get() = 5.2f * tileW
-              private val maxSafeY get() = 8.0f * tileH
+              private val maxSafeY get() = 7.5f * tileH
 
               override fun onBind(intent: Intent?): IBinder? = null
               override fun onCreate() {
@@ -222,13 +220,16 @@ jobs:
                   inst = this
                   val dm = resources.displayMetrics; sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.22f; joyY = sH * 0.75f
-                  val chId = "bot_v34"
+                  anchorX = sW / 2f; anchorY = sH / 2f
+                  playerPos = PointF(anchorX, anchorY)
+
+                  val chId = "bot_v35"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Running").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(124, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(124, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v3.5 Running").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(125, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(125, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -246,8 +247,9 @@ jobs:
               }
 
               fun resetAnchor() {
-                  offsetX = 0f; offsetY = 0f; savedTileX = null; savedTileY = null
-                  Toast.makeText(this, "Đã khóa GỐC an toàn 12x18 ô!", Toast.LENGTH_SHORT).show()
+                  anchorX = playerPos.x; anchorY = playerPos.y
+                  savedTileX = null; savedTileY = null
+                  Toast.makeText(this, "Đã khóa GỐC tại vị trí hiện tại!", Toast.LENGTH_SHORT).show()
               }
 
               fun stopCompletely() {
@@ -271,10 +273,43 @@ jobs:
                   return lastBmp
               }
 
-              private fun isInsidePlayerZone(x: Float, y: Float, cx: Float, cy: Float): Boolean {
-                  val dx = abs(x - cx)
-                  val dy = y - cy
-                  return dx < (1.35f * tileW) && (dy >= -1.6f * tileH && dy <= 1.95f * tileH)
+              // TỰ ĐỘNG ĐỊNH VỊ TỌA ĐỘ CIVICE QUA LÔNG VŨ TÍM VÀ KHIÊN XANH
+              private fun detectPlayerPosition(scr: Bitmap): PointF? {
+                  val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
+                  val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
+                  val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
+
+                  val startY = (sh * 0.15f).toInt(); val endY = (sh * 0.85f).toInt()
+                  val startX = (sw * 0.15f).toInt(); val endX = (sw * 0.85f).toInt()
+
+                  var purpleSumX = 0L; var purpleSumY = 0L; var purpleCount = 0
+
+                  for (y in startY until endY step 2) {
+                      for (x in startX until endX step 2) {
+                          val c = px[y * sw + x]
+                          val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
+                          // Lông vũ tím trên mũ Civice: B và R vượt trội so với G
+                          if (b > 185 && r > 150 && g in 110..185 && b > g + 35 && r > g + 15) {
+                              purpleSumX += x
+                              purpleSumY += y
+                              purpleCount++
+                          }
+                      }
+                  }
+
+                  if (purpleCount >= 3) {
+                      val pFeatherX = (purpleSumX / purpleCount) / sc
+                      val pFeatherY = (purpleSumY / purpleCount) / sc
+                      // Tâm người cưỡi ngựa nằm dưới lông vũ khoảng 1 ô đất
+                      return PointF(pFeatherX, pFeatherY + 1.05f * tileH)
+                  }
+                  return null
+              }
+
+              private fun isInsidePlayerZone(x: Float, y: Float, px: Float, py: Float): Boolean {
+                  val dx = abs(x - px)
+                  val dy = y - py
+                  return dx < (1.15f * tileW) && (dy >= -1.3f * tileH && dy <= 1.4f * tileH)
               }
 
               fun toggleRun(): Boolean {
@@ -283,83 +318,86 @@ jobs:
                       if (BotAccService.inst == null) { Toast.makeText(this, "CHƯA BẬT TRỢ NĂNG!", Toast.LENGTH_LONG).show(); running = false; return false }
                       resetAnchor()
                       job = CoroutineScope(Dispatchers.Default).launch {
-                          val cx = sW / 2f
-                          val cy = sH / 2f
-
-                          // Tính khung vùng né hiện tại
-                          val dzW = 1.35f * tileW
-                          val dzTop = 1.6f * tileH
-                          val dzBot = 1.95f * tileH
-                          val deadRect = RectF(cx - dzW, cy - dzTop, cx + dzW, cy + dzBot)
-
                           while (running) {
                               val scr = getScreen()
                               if (scr == null) { delay(80); continue }
 
-                              // 1. Khóa an toàn 12x18 ô quanh Gốc
-                              if (abs(offsetX) >= maxSafeX || abs(offsetY) >= maxSafeY) {
-                                  FloatingService.inst?.updateHUD(null, null, "", deadRect, PointF(cx, cy))
-                                  val backAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
+                              // 1. CẬP NHẬT TỌA ĐỘ CIVICE THỜI GIAN THỰC
+                              val detected = detectPlayerPosition(scr)
+                              if (detected != null) {
+                                  playerPos = detected
+                              }
+
+                              val px = playerPos.x
+                              val py = playerPos.y
+
+                              // Khung né động bám dính theo Civice
+                              val dzW = 1.15f * tileW
+                              val dzTop = 1.3f * tileH
+                              val dzBot = 1.4f * tileH
+                              val deadRect = RectF(px - dzW, py - dzTop, px + dzW, py + dzBot)
+
+                              // 2. KHÓA BÁN KÍNH AN TOÀN QUANH GỐC
+                              val offAnchorX = px - anchorX
+                              val offAnchorY = py - anchorY
+                              if (abs(offAnchorX) >= maxSafeX || abs(offAnchorY) >= maxSafeY) {
+                                  FloatingService.inst?.updateHUD(null, null, "", deadRect, PointF(px, py))
+                                  val backAng = atan2(-offAnchorY.toDouble(), -offAnchorX.toDouble())
                                   val bStep = tileW * 0.85f
-                                  BotAccService.inst?.walkToward(joyX, joyY, cx + (bStep * cos(backAng)).toFloat(), cy + (bStep * sin(backAng)).toFloat(), cx, cy, 300)
-                                  offsetX += (bStep * cos(backAng)).toFloat()
-                                  offsetY += (bStep * sin(backAng)).toFloat()
+                                  BotAccService.inst?.walkToward(joyX, joyY, px + (bStep * cos(backAng)).toFloat(), py + (bStep * sin(backAng)).toFloat(), px, py, 300)
                                   delay(320); continue
                               }
 
-                              // 2. Quái vật & Boss có thanh máu đỏ
-                              val mPt = findMonsterSafe(scr, cx, cy)
+                              // 3. TẦNG 1: QUÁI VẬT & BOSS
+                              val mPt = findMonsterSafe(scr, px, py)
                               if (mPt != null) {
                                   val mBox = RectF(mPt.x - 26f, mPt.y - 10f, mPt.x + 26f, mPt.y + 44f)
-                                  FloatingService.inst?.updateHUD(mBox, null, "", deadRect, PointF(cx, cy))
-                                  val d = hypot((mPt.x - cx).toDouble(), (mPt.y - cy).toDouble()).toFloat()
-                                  val ang = atan2((mPt.y - cy).toDouble(), (mPt.x - cx).toDouble())
-                                  val st = if (d > 40f) tileW * 0.8f else tileW * 0.4f
-                                  BotAccService.inst?.walkToward(joyX, joyY, mPt.x, mPt.y, cx, cy, 260)
-                                  offsetX += (st * cos(ang)).toFloat(); offsetY += (st * sin(ang)).toFloat()
+                                  FloatingService.inst?.updateHUD(mBox, null, "", deadRect, PointF(px, py))
+                                  val d = hypot((mPt.x - px).toDouble(), (mPt.y - py).toDouble()).toFloat()
+                                  val ang = atan2((mPt.y - py).toDouble(), (mPt.x - px).toDouble())
+                                  val st = if (d > 40f) tileW * 0.85f else tileW * 0.4f
+                                  BotAccService.inst?.walkToward(joyX, joyY, mPt.x, mPt.y, px, py, 260)
                                   delay(280); continue
                               }
 
-                              // 3. Tìm ô đất / đá / rêu
+                              // 4. TẦNG 2: TÌM Ô ĐẤT / ĐÁ / RÊU THEO VỊ TRÍ CIVICE
                               var tPt: PointF? = null
                               if (savedTileX != null && savedTileY != null) {
-                                  val sx = cx + (savedTileX!! - offsetX); val sy = cy + (savedTileY!! - offsetY)
-                                  if (isInSafeRect(savedTileX!!, savedTileY!!) && isTileAlive(scr, sx, sy)) {
+                                  val sx = savedTileX!!; val sy = savedTileY!!
+                                  if (isInSafeRect(sx, sy) && isTileAlive(scr, sx, sy)) {
                                       tPt = PointF(sx, sy)
                                   } else {
                                       savedTileX = null; savedTileY = null
                                   }
                               }
                               if (tPt == null) {
-                                  tPt = findNearestTileExcludingShadow(scr, cx, cy)
-                                  if (tPt != null) { savedTileX = offsetX + (tPt.x - cx); savedTileY = offsetY + (tPt.y - cy) }
+                                  tPt = findNearestTileDynamic(scr, px, py)
+                                  if (tPt != null) { savedTileX = tPt.x; savedTileY = tPt.y }
                               }
 
                               if (tPt != null) {
-                                  val curDx = (tPt.x - cx).toInt()
-                                  val curDy = (tPt.y - cy).toInt()
-                                  val statsTxt = "dx:${curDx} dy:${curDy} [${tileW.toInt()}x${tileH.toInt()}]"
+                                  val curDx = (tPt.x - px).toInt()
+                                  val curDy = (tPt.y - py).toInt()
+                                  val statsTxt = "dx:${curDx} dy:${curDy}"
 
-                                  FloatingService.inst?.updateHUD(null, RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f), statsTxt, deadRect, PointF(cx, cy))
-                                  val d = hypot((tPt.x - cx).toDouble(), (tPt.y - cy).toDouble()).toFloat()
-                                  if (d <= 26f) {
-                                      delay(240)
+                                  FloatingService.inst?.updateHUD(null, RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f), statsTxt, deadRect, PointF(px, py))
+                                  val distToTarget = hypot((tPt.x - px).toDouble(), (tPt.y - py).toDouble()).toFloat()
+
+                                  // ĐIỀU KIỆN ĐẾN ĐÍCH CHUẨN XÁC: SO SÁNH CIVICE VỚI Ô ĐẤT
+                                  if (distToTarget <= (tileW * 0.65f)) {
+                                      // Đã đứng sát ô đất: Thả tay đập vỡ
+                                      delay(260)
                                   } else {
-                                      val ang = atan2((tPt.y - cy).toDouble(), (tPt.x - cx).toDouble())
-                                      val st = tileW * 0.8f
-                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, cx, cy, 280)
-                                      offsetX += (st * cos(ang)).toFloat(); offsetY += (st * sin(ang)).toFloat()
+                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 280)
                                       delay(300)
                                   }
                               } else {
-                                  // Hết ô: Quay về tâm ban đầu
                                   savedTileX = null; savedTileY = null
-                                  FloatingService.inst?.updateHUD(null, null, "", deadRect, PointF(cx, cy))
-                                  val distFromHome = hypot(offsetX.toDouble(), offsetY.toDouble()).toFloat()
-                                  if (distFromHome > 40f) {
-                                      val backAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
-                                      BotAccService.inst?.walkToward(joyX, joyY, cx + (50f * cos(backAng)).toFloat(), cy + (50f * sin(backAng)).toFloat(), cx, cy, 260)
-                                      offsetX += (40f * cos(backAng)).toFloat(); offsetY += (40f * sin(backAng)).toFloat()
+                                  FloatingService.inst?.updateHUD(null, null, "", deadRect, PointF(px, py))
+                                  val distFromHome = hypot((px - anchorX).toDouble(), (py - anchorY).toDouble()).toFloat()
+                                  if (distFromHome > 45f) {
+                                      val backAng = atan2((anchorY - py).toDouble(), (anchorX - px).toDouble())
+                                      BotAccService.inst?.walkToward(joyX, joyY, px + (50f * cos(backAng)).toFloat(), py + (50f * sin(backAng)).toFloat(), px, py, 260)
                                   }
                                   delay(300)
                               }
@@ -371,38 +409,37 @@ jobs:
                   return running
               }
 
-              private fun isInSafeRect(thX: Float, thY: Float): Boolean {
-                  return abs(thX) <= maxSafeX && abs(thY) <= maxSafeY
+              private fun isInSafeRect(tx: Float, ty: Float): Boolean {
+                  return abs(tx - anchorX) <= maxSafeX && abs(ty - anchorY) <= maxSafeY
               }
 
-              private fun findMonsterSafe(scr: Bitmap, cx: Float, cy: Float): PointF? {
+              private fun findMonsterSafe(scr: Bitmap, px: Float, py: Float): PointF? {
                   val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
+                  val pxs = IntArray(sw * sh); bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
                   val startY = (sh * 0.12f).toInt(); val endY = (sh * 0.88f).toInt()
-                  val startX = (sw * 0.12f).toInt(); val endX = (sw * 0.88f).toInt()
+                  val startX = (sw * 0.10f).toInt(); val endX = (sw * 0.90f).toInt()
 
                   for (y in startY until endY step 2) {
                       for (x in startX until endX step 3) {
-                          val c = px[y * sw + x]
+                          val c = pxs[y * sw + x]
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
                           if (r > 185 && g < 55 && b < 55) {
                               var redLen = 0
                               for (dx in 0..4) {
                                   if (x + dx < sw) {
-                                      val cScan = px[y * sw + (x + dx)]
+                                      val cScan = pxs[y * sw + (x + dx)]
                                       if ((cScan shr 16 and 0xFF) > 170 && (cScan shr 8 and 0xFF) < 65) redLen++
                                   }
                               }
                               if (redLen >= 3) {
                                   val realX = (x + redLen / 2) / sc; val realY = (y / sc) + 26f
-                                  if (isInsidePlayerZone(realX, realY, cx, cy)) continue
+                                  if (isInsidePlayerZone(realX, realY, px, py)) continue
 
-                                  val thX = offsetX + (realX - cx); val thY = offsetY + (realY - cy)
-                                  if (isInSafeRect(thX, thY)) {
-                                      val dx = (realX - cx).toDouble(); val dy = (realY - cy).toDouble()
+                                  if (isInSafeRect(realX, realY)) {
+                                      val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
                                       val distChar = dx * dx + dy * dy
                                       if (distChar < minD) { minD = distChar; best = PointF(realX, realY) }
                                   }
@@ -426,16 +463,14 @@ jobs:
               private fun isTileAlive(scr: Bitmap, sx: Float, sy: Float): Boolean {
                   val ix = sx.toInt().coerceIn(10, scr.width - 11)
                   val iy = sy.toInt().coerceIn(10, scr.height - 11)
-                  val offX = (tileW * 0.32f).toInt()
-                  val offY = (tileH * 0.32f).toInt()
+                  val offX = (tileW * 0.32f).toInt(); val offY = (tileH * 0.32f).toInt()
                   val samplePoints = arrayOf(
                       Pair(ix - offX, iy - offY), Pair(ix + offX, iy - offY),
                       Pair(ix - offX, iy + offY), Pair(ix + offX, iy + offY),
                       Pair(ix - offX, iy), Pair(ix + offX, iy),
                       Pair(ix, iy - offY), Pair(ix, iy + offY)
                   )
-                  var grassCount = 0
-                  var tileCount = 0
+                  var grassCount = 0; var tileCount = 0
                   for (pt in samplePoints) {
                       val pxX = pt.first.coerceIn(0, scr.width - 1)
                       val pxY = pt.second.coerceIn(0, scr.height - 1)
@@ -447,10 +482,11 @@ jobs:
                   return grassCount < 4 && tileCount >= 2
               }
 
-              private fun findNearestTileExcludingShadow(scr: Bitmap, cx: Float, cy: Float): PointF? {
+              // QUÉT TÌM Ô ĐẤT GẦN NHẤT SO VỚI TỌA ĐỘ THỰC CỦA CIVICE
+              private fun findNearestTileDynamic(scr: Bitmap, px: Float, py: Float): PointF? {
                   val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
+                  val pxs = IntArray(sw * sh); bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
                   val startY = (sh * 0.12f).toInt(); val endY = (sh * 0.88f).toInt()
@@ -458,19 +494,18 @@ jobs:
 
                   for (y in startY until endY step 4) {
                       for (x in startX until endX step 4) {
-                          val c = px[y * sw + x]
+                          val c = pxs[y * sw + x]
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
                           if (isTileColor(r, g, b)) {
                               val realX = x / sc; val realY = y / sc
-                              if (isInsidePlayerZone(realX, realY, cx, cy)) continue
+                              if (isInsidePlayerZone(realX, realY, px, py)) continue
 
-                              val thX = offsetX + (realX - cx); val thY = offsetY + (realY - cy)
-                              if (isInSafeRect(thX, thY)) {
-                                  val dx = (realX - cx).toDouble(); val dy = (realY - cy).toDouble()
-                                  val distChar = dx * dx + dy * dy
-                                  if (distChar < minD) {
-                                      minD = distChar
+                              if (isInSafeRect(realX, realY)) {
+                                  val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
+                                  val distToCivice = dx * dx + dy * dy
+                                  if (distToCivice < minD) {
+                                      minD = distToCivice
                                       best = PointF(realX, realY)
                                   }
                               }
@@ -493,8 +528,8 @@ jobs:
               private lateinit var hudView: TrackingOverlayView
 
               override fun onBind(i: Intent?): IBinder? = null
-              fun updateHUD(m: RectF?, t: RectF?, stats: String = "", dz: RectF? = null, cp: PointF? = null) {
-                  if (::hudView.isInitialized) hudView.update(m, t, stats, dz, cp)
+              fun updateHUD(m: RectF?, t: RectF?, stats: String = "", dz: RectF? = null, pp: PointF? = null) {
+                  if (::hudView.isInitialized) hudView.update(m, t, stats, dz, pp)
               }
 
               private fun killAppAndExit() {
@@ -643,5 +678,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v3.4-APK
+          name: KhobauBot-v3.5-APK
           path: app/build/outputs/apk/debug/*.apk
