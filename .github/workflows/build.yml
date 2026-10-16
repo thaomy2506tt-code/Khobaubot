@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Build All KhobauBot
+      - name: Build KhobauBot Safe Anchor v2.7
         run: |
           mkdir -p app/src/main/java/com/bot app/src/main/res/xml
           echo "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }; dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }; rootProject.name = 'Khobaubot'; include ':app'" > settings.gradle
@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 14; versionName '2.4' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 17; versionName '2.7' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -79,6 +79,7 @@ jobs:
           import android.content.Intent
           import android.content.pm.ServiceInfo
           import android.graphics.*
+          import android.graphics.drawable.GradientDrawable
           import android.hardware.display.DisplayManager
           import android.media.ImageReader
           import android.media.projection.MediaProjection
@@ -136,30 +137,38 @@ jobs:
               override fun onDestroy() { super.onDestroy(); inst = null }
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
-              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, cx: Float, cy: Float, dMs: Long = 230) {
+
+              // Vuốt mượt mà nhịp nhàng
+              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, cx: Float, cy: Float, dMs: Long = 260) {
                   val angle = atan2((ty - cy).toDouble(), (tx - cx).toDouble())
-                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (125f * cos(angle)).toFloat(), jy + (125f * sin(angle)).toFloat()) }
+                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (120f * cos(angle)).toFloat(), jy + (120f * sin(angle)).toFloat()) }
                   dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, dMs)).build(), null, null)
               }
           }
 
           class TrackingOverlayView(ctx: Context) : View(ctx) {
+              var isHudVisible = true
               private var mR: RectF? = null; private var tR: RectF? = null; private var hue = 0f
-              private val pBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 6f; isAntiAlias = true }
-              private val pTxt = Paint().apply { textSize = 26f; isFakeBoldText = true; isAntiAlias = true; setShadowLayer(4f, 2f, 2f, Color.BLACK) }
-              fun update(m: RectF?, t: RectF?) { mR = m; tR = t; hue = (hue + 18f) % 360f; postInvalidate() }
+              private val pBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3f; isAntiAlias = true }
+              private val pTxt = Paint().apply { textSize = 22f; isFakeBoldText = true; isAntiAlias = true; setShadowLayer(3f, 1f, 1f, Color.BLACK) }
+
+              fun update(m: RectF?, t: RectF?) { mR = m; tR = t; hue = (hue + 16f) % 360f; postInvalidate() }
+
               override fun onDraw(c: Canvas) {
                   super.onDraw(c)
+                  if (!isHudVisible) return
+
                   tR?.let { r ->
-                      val col = Color.HSVToColor(floatArrayOf(hue, 1f, 1f))
+                      val col = Color.HSVToColor(floatArrayOf(hue, 0.9f, 1f))
                       pBox.color = col; pTxt.color = col; c.drawRoundRect(r, 6f, 6f, pBox)
-                      val ty = if (r.top - 8f > 30f) r.top - 8f else 30f
-                      c.drawText("Ô ĐẬP", r.left, ty, pTxt)
+                      val ty = if (r.top - 6f > 26f) r.top - 6f else 26f
+                      c.drawText("• Ô ĐẬP", r.left, ty, pTxt)
                   }
                   mR?.let { r ->
-                      pBox.color = Color.RED; pTxt.color = Color.RED; c.drawRoundRect(r, 6f, 6f, pBox)
-                      val ty = if (r.top - 8f > 30f) r.top - 8f else 30f
-                      c.drawText("QUÁI / BOSS", r.left, ty, pTxt)
+                      pBox.color = Color.parseColor("#FF1744"); pTxt.color = Color.parseColor("#FF1744")
+                      c.drawRoundRect(r, 6f, 6f, pBox)
+                      val ty = if (r.top - 6f > 26f) r.top - 6f else 26f
+                      c.drawText("• QUÁI", r.left, ty, pTxt)
                   }
               }
           }
@@ -173,7 +182,10 @@ jobs:
               private var savedTileX: Float? = null; private var savedTileY: Float? = null
               private var running = false; private var job: Job? = null
               private var sW = 720; private var sH = 1280
+
               private val tileSize = 55f
+              // GIỚI HẠN AN TOÀN TUYỆT ĐỐI: CHỈ TRONG PHẠM VI 6 Ô ĐẤT QUANH GỐC (TRONG TẦM MẮT ĐIỆN THOẠI)
+              private val maxSafeDistPx get() = 6.5f * tileSize
 
               override fun onBind(intent: Intent?): IBinder? = null
               override fun onCreate() {
@@ -181,13 +193,13 @@ jobs:
                   inst = this
                   val dm = resources.displayMetrics; sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.22f; joyY = sH * 0.75f
-                  val chId = "bot_v24"
+                  val chId = "bot_v27"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Multi-Zone").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(114, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(114, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Safe Leash").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(117, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(117, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -204,7 +216,10 @@ jobs:
                   return START_STICKY
               }
 
-              fun resetAnchor() { offsetX = 0f; offsetY = 0f; savedTileX = null; savedTileY = null; Toast.makeText(this, "Đã chốt GỐC 20 Ô!", Toast.LENGTH_SHORT).show() }
+              fun resetAnchor() {
+                  offsetX = 0f; offsetY = 0f; savedTileX = null; savedTileY = null
+                  Toast.makeText(this, "Đã khóa GỐC an toàn tại đây!", Toast.LENGTH_SHORT).show()
+              }
 
               fun getScreen(): Bitmap? {
                   val img = reader?.acquireLatestImage() ?: return lastBmp
@@ -227,59 +242,81 @@ jobs:
                           val cx = sW / 2f; val cy = sH / 2f
                           while (running) {
                               val scr = getScreen()
-                              if (scr == null) { delay(120); continue }
-                              val maxDist = 20 * tileSize
-                              val distHome = hypot(offsetX.toDouble(), offsetY.toDouble()).toFloat()
+                              if (scr == null) { delay(100); continue }
 
-                              if (distHome >= maxDist) {
+                              // 1. CẢM BIẾN BẢO VỆ: NẾU THẤY NỀN ĐẤT XÁM (RANH GIỚI VÙNG XÁM) -> LẬP TỨC QUAY NGƯỢC VỀ CỎ XANH
+                              if (isGrayZoneDanger(scr, cx, cy)) {
                                   FloatingService.inst?.updateHUD(null, null)
-                                  val bAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
-                                  val bStep = tileSize * 0.75f
-                                  BotAccService.inst?.walkToward(joyX, joyY, cx + (bStep * cos(bAng)).toFloat(), cy + (bStep * sin(bAng)).toFloat(), cx, cy, 250)
-                                  offsetX += (bStep * cos(bAng)).toFloat(); offsetY += (bStep * sin(bAng)).toFloat()
-                                  delay(260); continue
+                                  val backAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
+                                  BotAccService.inst?.walkToward(joyX, joyY, cx + (45f * cos(backAng)).toFloat(), cy + (45f * sin(backAng)).toFloat(), cx, cy, 280)
+                                  offsetX *= 0.6f; offsetY *= 0.6f
+                                  delay(300); continue
                               }
 
-                              val mPt = findMonsterAccurate(scr, cx, cy, maxDist)
+                              // 2. KHÓA BÁN KÍNH AN TOÀN: NẾU CHẠM VIỀN TẦM MẮT (6 Ô) -> QUAY VỀ GỐC
+                              val distFromAnchor = hypot(offsetX.toDouble(), offsetY.toDouble()).toFloat()
+                              if (distFromAnchor >= maxSafeDistPx) {
+                                  FloatingService.inst?.updateHUD(null, null)
+                                  val backAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
+                                  val bStep = tileSize * 0.75f
+                                  BotAccService.inst?.walkToward(joyX, joyY, cx + (bStep * cos(backAng)).toFloat(), cy + (bStep * sin(backAng)).toFloat(), cx, cy, 260)
+                                  offsetX += (bStep * cos(backAng)).toFloat()
+                                  offsetY += (bStep * sin(backAng)).toFloat()
+                                  delay(270); continue
+                              }
+
+                              // 3. ƯU TIÊN SĂN QUÁI / BOSS TRONG VÙNG TẦM MẮT
+                              val mPt = findMonsterInSafeRadius(scr, cx, cy, maxSafeDistPx)
                               if (mPt != null) {
-                                  val mBox = RectF(mPt.x - 28f, mPt.y - 12f, mPt.x + 28f, mPt.y + 46f)
+                                  val mBox = RectF(mPt.x - 26f, mPt.y - 10f, mPt.x + 26f, mPt.y + 44f)
                                   FloatingService.inst?.updateHUD(mBox, null)
                                   val d = hypot((mPt.x - cx).toDouble(), (mPt.y - cy).toDouble()).toFloat()
                                   val ang = atan2((mPt.y - cy).toDouble(), (mPt.x - cx).toDouble())
                                   val st = if (d > 35f) tileSize * 0.7f else tileSize * 0.35f
                                   BotAccService.inst?.walkToward(joyX, joyY, mPt.x, mPt.y, cx, cy, 210)
                                   offsetX += (st * cos(ang)).toFloat(); offsetY += (st * sin(ang)).toFloat()
-                                  delay(200); continue
+                                  delay(210); continue
                               }
 
+                              // 4. DỌN Ô ĐẤT AN TOÀN GẦN GỐC
                               var tPt: PointF? = null
                               if (savedTileX != null && savedTileY != null) {
                                   val sx = cx + (savedTileX!! - offsetX); val sy = cy + (savedTileY!! - offsetY)
-                                  if (sx in 40f..(sW - 40f) && sy in 40f..(sH - 40f) && isTileStillAlive(scr, sx, sy)) {
+                                  if (isInSafeScreen(sx, sy) && isTileStillAlive(scr, sx, sy)) {
                                       tPt = PointF(sx, sy)
                                   } else {
                                       savedTileX = null; savedTileY = null
                                   }
                               }
                               if (tPt == null) {
-                                  tPt = findNearestTile3Zones(scr, cx, cy, maxDist)
+                                  tPt = findNearestTileSafe(scr, cx, cy, maxSafeDistPx)
                                   if (tPt != null) { savedTileX = offsetX + (tPt.x - cx); savedTileY = offsetY + (tPt.y - cy) }
                               }
 
                               if (tPt != null) {
-                                  FloatingService.inst?.updateHUD(null, RectF(tPt.x - 27f, tPt.y - 27f, tPt.x + 27f, tPt.y + 27f))
+                                  FloatingService.inst?.updateHUD(null, RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f))
                                   val d = hypot((tPt.x - cx).toDouble(), (tPt.y - cy).toDouble()).toFloat()
                                   if (d <= 18f) {
+                                      // Đã đứng ngay tâm ô: Đứng yên đập
                                       delay(220)
                                   } else {
                                       val ang = atan2((tPt.y - cy).toDouble(), (tPt.x - cx).toDouble())
                                       val st = tileSize * 0.7f
                                       BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, cx, cy, 220)
                                       offsetX += (st * cos(ang)).toFloat(); offsetY += (st * sin(ang)).toFloat()
-                                      delay(220)
+                                      delay(230)
                                   }
                               } else {
-                                  savedTileX = null; savedTileY = null; FloatingService.inst?.updateHUD(null, null); delay(300)
+                                  // KHÔNG CÒN Ô NÀO GẦN: TỰ ĐỘNG BƯỚC VỀ LẠI GỐC BAN ĐẦU CHỜ SPAWN
+                                  savedTileX = null; savedTileY = null
+                                  FloatingService.inst?.updateHUD(null, null)
+                                  if (distFromAnchor > 30f) {
+                                      val backAng = atan2(-offsetY.toDouble(), -offsetX.toDouble())
+                                      BotAccService.inst?.walkToward(joyX, joyY, cx + (40f * cos(backAng)).toFloat(), cy + (40f * sin(backAng)).toFloat(), cx, cy, 240)
+                                      offsetX += (35f * cos(backAng)).toFloat()
+                                      offsetY += (35f * sin(backAng)).toFloat()
+                                  }
+                                  delay(280)
                               }
                           }
                       }
@@ -289,14 +326,42 @@ jobs:
                   return running
               }
 
-              private fun findMonsterAccurate(scr: Bitmap, cx: Float, cy: Float, maxPx: Float): PointF? {
+              // PHÁT HIỆN RANH GIỚI VÙNG XÁM NGUY HIỂM (NỀN TỐI XÁM, KHÔNG CÓ SẮC TỐ CỎ XANH)
+              private fun isGrayZoneDanger(scr: Bitmap, cx: Float, cy: Float): Boolean {
+                  val ix = cx.toInt().coerceIn(10, scr.width - 11)
+                  val iy = cy.toInt().coerceIn(10, scr.height - 11)
+                  var grayPixelCount = 0
+                  for (dy in -30..30 step 15) {
+                      for (dx in -30..30 step 15) {
+                          val c = scr.getPixel(ix + dx, iy + dy)
+                          val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
+                          // Nền đất xám u ám: r, g, b đều thấp và xấp xỉ nhau, hoàn toàn thiếu sắc xanh của cỏ
+                          if (r in 35..85 && g in 35..85 && b in 35..85 && abs(r - g) < 10 && abs(g - b) < 10 && g < r + 6) {
+                              grayPixelCount++
+                          }
+                      }
+                  }
+                  return grayPixelCount >= 10
+              }
+
+              private fun isInSafeScreen(x: Float, y: Float): Boolean {
+                  val minX = sW * 0.25f; val maxX = sW * 0.75f
+                  val minY = sH * 0.20f; val maxY = sH * 0.80f
+                  return x in minX..maxX && y in minY..maxY
+              }
+
+              // QUÉT VẠCH MÁU QUÁI CHỈ TRONG BÁN KÍNH AN TOÀN
+              private fun findMonsterInSafeRadius(scr: Bitmap, cx: Float, cy: Float, maxPx: Float): PointF? {
                   val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
                   val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
-                  for (y in 12 until (sh - 14) step 2) {
-                      for (x in 8 until (sw - 16) step 3) {
+                  val startY = (sh * 0.20f).toInt(); val endY = (sh * 0.80f).toInt()
+                  val startX = (sw * 0.25f).toInt(); val endX = (sw * 0.75f).toInt()
+
+                  for (y in startY until endY step 2) {
+                      for (x in startX until endX step 3) {
                           val c = px[y * sw + x]
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
                           if (r > 185 && g < 55 && b < 55) {
@@ -327,10 +392,8 @@ jobs:
                   val isGreenDirt = (r in 95..165 && g in 55..120 && b in 25..90 && r > g + 10)
                   val isGreenStone = (r in 115..190 && g in 115..190 && b in 110..185 && abs(r - g) < 22 && abs(g - b) < 22)
                   val isGreenBush = (g in 105..175 && r in 90..160 && b in 50..120 && g >= r - 10 && r > b + 10)
-                  val isGrayBlock = (r in 85..155 && g in 85..155 && b in 80..150 && abs(r - g) < 18 && abs(g - b) < 18)
                   val isIce = (b in 165..245 && g in 145..235 && r in 90..175 && b > r + 35)
-                  val isFrozenStone = (b in 120..190 && g in 105..175 && r in 85..155 && b >= g)
-                  return isGreenDirt || isGreenStone || isGreenBush || isGrayBlock || isIce || isFrozenStone
+                  return isGreenDirt || isGreenStone || isGreenBush || isIce
               }
 
               private fun isTileStillAlive(scr: Bitmap, x: Float, y: Float): Boolean {
@@ -345,14 +408,18 @@ jobs:
                   return count >= 3
               }
 
-              private fun findNearestTile3Zones(scr: Bitmap, cx: Float, cy: Float, maxPx: Float): PointF? {
+              // CHỈ CHỌN CÁC Ô ĐẤT NẰM TRONG BÁN KÍNH AN TOÀN TẦM NHÌN
+              private fun findNearestTileSafe(scr: Bitmap, cx: Float, cy: Float, maxPx: Float): PointF? {
                   val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
                   val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
                   val px = IntArray(sw * sh); bmp.getPixels(px, 0, sw, 0, 0, sw, sh)
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
-                  for (y in 10 until (sh - 10) step 5) {
-                      for (x in 10 until (sw - 10) step 5) {
+                  val startY = (sh * 0.20f).toInt(); val endY = (sh * 0.80f).toInt()
+                  val startX = (sw * 0.25f).toInt(); val endX = (sw * 0.75f).toInt()
+
+                  for (y in startY until endY step 5) {
+                      for (x in startX until endX step 5) {
                           val c = px[y * sw + x]
                           if (isTileColorMultiZone(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) {
                               val realX = x / sc; val realY = y / sc
@@ -374,7 +441,9 @@ jobs:
           class FloatingService : Service() {
               companion object { var inst: FloatingService? = null }
               private lateinit var wm: WindowManager
-              private lateinit var barView: LinearLayout
+              private lateinit var rootContainer: LinearLayout
+              private lateinit var miniBubble: TextView
+              private lateinit var menuCard: LinearLayout
               private lateinit var joyView: TextView
               private lateinit var hudView: TrackingOverlayView
 
@@ -396,29 +465,107 @@ jobs:
                       PixelFormat.TRANSLUCENT
                   ))
 
-                  barView = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Color.parseColor("#EE1E1E1E")); setPadding(6, 6, 6, 6) }
-                  val bStart = Button(this).apply { text = "START"; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#2E7D32")) }
-                  val bGoc = Button(this).apply { text = "GỐC"; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#7B1FA2")) }
-                  val bJoy = Button(this).apply { text = "JOY"; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#00897B")) }
-                  val bClose = Button(this).apply { text = "X"; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#C62828")) }
+                  rootContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-                  barView.addView(bStart); barView.addView(bGoc); barView.addView(bJoy); barView.addView(bClose)
-                  val pBar = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
-                      gravity = Gravity.TOP or Gravity.START; x = 30; y = 100
+                  // 1. NÚT TRÒN THU GỌN (MINI BUBBLE)
+                  miniBubble = TextView(this).apply {
+                      text = "💎"
+                      textSize = 20f
+                      gravity = Gravity.CENTER
+                      background = GradientDrawable().apply {
+                          shape = GradientDrawable.OVAL
+                          setColor(Color.parseColor("#E6212121"))
+                          setStroke(2, Color.parseColor("#40C4FF"))
+                      }
+                      visibility = View.GONE
                   }
-                  wm.addView(barView, pBar)
+                  rootContainer.addView(miniBubble, LinearLayout.LayoutParams(95, 95))
 
-                  val pJoy = WindowManager.LayoutParams(130, 130, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
+                  // 2. BẢNG MENU DỌC (VERTICAL CARD - KHÔNG DÙNG MÀU ĐỎ)
+                  menuCard = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(12, 10, 12, 10)
+                      background = GradientDrawable().apply {
+                          cornerRadius = 24f
+                          setColor(Color.parseColor("#F21E1E24"))
+                          setStroke(2, Color.parseColor("#374151"))
+                      }
+                  }
+
+                  fun createItemBtn(title: String, col: Int): Button {
+                      return Button(this).apply {
+                          text = title
+                          textSize = 12f
+                          setTextColor(Color.WHITE)
+                          background = GradientDrawable().apply { cornerRadius = 16f; setColor(col) }
+                          setPadding(16, 6, 16, 6)
+                      }
+                  }
+
+                  val headerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                  val titleTv = TextView(this).apply { text = "KHOBAU BOT"; textSize = 11f; setTextColor(Color.parseColor("#9CA3AF")); setPadding(6, 0, 16, 0) }
+                  val btnMinimize = Button(this).apply {
+                      text = "▲ Thu"
+                      textSize = 10f
+                      setTextColor(Color.WHITE)
+                      background = GradientDrawable().apply { cornerRadius = 12f; setColor(Color.parseColor("#4B5563")) }
+                  }
+                  val btnClose = Button(this).apply {
+                      text = "✕"
+                      textSize = 10f
+                      setTextColor(Color.WHITE)
+                      background = GradientDrawable().apply { cornerRadius = 12f; setColor(Color.parseColor("#374151")) }
+                  }
+                  headerRow.addView(titleTv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                  headerRow.addView(btnMinimize, LinearLayout.LayoutParams(95, 55).apply { marginEnd = 6 })
+                  headerRow.addView(btnClose, LinearLayout.LayoutParams(65, 55))
+
+                  val bStart = createItemBtn("▶ START AUTO", Color.parseColor("#059669"))
+                  val bGoc = createItemBtn("🎯 ĐẶT LẠI GỐC", Color.parseColor("#4F46E5"))
+                  val bJoy = createItemBtn("🕹 ĐẶT JOYSTICK", Color.parseColor("#0891B2"))
+                  val bHudToggle = createItemBtn("👁 KHUNG: BẬT", Color.parseColor("#2563EB"))
+
+                  val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 68).apply { topMargin = 8 }
+                  menuCard.addView(headerRow)
+                  menuCard.addView(bStart, lp)
+                  menuCard.addView(bGoc, lp)
+                  menuCard.addView(bJoy, lp)
+                  menuCard.addView(bHudToggle, lp)
+
+                  rootContainer.addView(menuCard, LinearLayout.LayoutParams(260, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+                  val pRoot = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                      type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 30; y = 140 }
+                  wm.addView(rootContainer, pRoot)
+
+                  val pJoy = WindowManager.LayoutParams(120, 120, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
                       gravity = Gravity.TOP or Gravity.START; x = 120; y = 750
                   }
-                  joyView = TextView(this).apply { text = "JOY\n(Chốt)"; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#AA00E676")) }
+                  joyView = TextView(this).apply {
+                      text = "JOY\n(Chốt)"; gravity = Gravity.CENTER; textSize = 11f; setTextColor(Color.WHITE)
+                      background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#B300E676")) }
+                  }
+
+                  btnMinimize.setOnClickListener {
+                      menuCard.visibility = View.GONE
+                      miniBubble.visibility = View.VISIBLE
+                  }
+
+                  miniBubble.setOnClickListener {
+                      miniBubble.visibility = View.GONE
+                      menuCard.visibility = View.VISIBLE
+                  }
 
                   bStart.setOnClickListener {
                       val a = CaptureService.inst?.toggleRun() ?: false
-                      bStart.text = if (a) "STOP" else "START"
-                      bStart.setBackgroundColor(if (a) Color.RED else Color.parseColor("#2E7D32"))
+                      bStart.text = if (a) "⏹ STOP AUTO" else "▶ START AUTO"
+                      (bStart.background as? GradientDrawable)?.setColor(if (a) Color.parseColor("#D97706") else Color.parseColor("#059669"))
                   }
+
                   bGoc.setOnClickListener { CaptureService.inst?.resetAnchor() }
+
                   bJoy.setOnClickListener { if (joyView.parent == null) wm.addView(joyView, pJoy) else wm.removeView(joyView) }
                   joyView.setOnClickListener {
                       val loc = IntArray(2); joyView.getLocationOnScreen(loc)
@@ -427,25 +574,40 @@ jobs:
                       Toast.makeText(this, "Đã chốt Joystick!", Toast.LENGTH_SHORT).show()
                       if (joyView.parent != null) wm.removeView(joyView)
                   }
-                  bClose.setOnClickListener { stopSelf() }
 
-                  fun drag(v: View, p: WindowManager.LayoutParams) {
+                  bHudToggle.setOnClickListener {
+                      hudView.isHudVisible = !hudView.isHudVisible
+                      bHudToggle.text = if (hudView.isHudVisible) "👁 KHUNG: BẬT" else "Ø KHUNG: TẮT"
+                      (bHudToggle.background as? GradientDrawable)?.setColor(if (hudView.isHudVisible) Color.parseColor("#2563EB") else Color.parseColor("#4B5563"))
+                      hudView.postInvalidate()
+                  }
+
+                  btnClose.setOnClickListener { stopSelf() }
+
+                  fun drag(v: View, p: WindowManager.LayoutParams, targetView: View) {
                       var ix = 0; var iy = 0; var tx = 0f; var ty = 0f
                       v.setOnTouchListener { _, e ->
                           when (e.action) {
                               MotionEvent.ACTION_DOWN -> { ix = p.x; iy = p.y; tx = e.rawX; ty = e.rawY; false }
-                              MotionEvent.ACTION_MOVE -> { p.x = ix + (e.rawX - tx).toInt(); p.y = iy + (e.rawY - ty).toInt(); wm.updateViewLayout(v, p); true }
+                              MotionEvent.ACTION_MOVE -> {
+                                  p.x = ix + (e.rawX - tx).toInt()
+                                  p.y = iy + (e.rawY - ty).toInt()
+                                  wm.updateViewLayout(targetView, p)
+                                  true
+                              }
                               else -> false
                           }
                       }
                   }
-                  drag(barView, pBar); drag(joyView, pJoy)
+                  drag(headerRow, pRoot, rootContainer)
+                  drag(miniBubble, pRoot, rootContainer)
+                  drag(joyView, pJoy, joyView)
               }
 
               override fun onDestroy() {
                   super.onDestroy()
                   if (::hudView.isInitialized && hudView.parent != null) wm.removeView(hudView)
-                  if (::barView.isInitialized && barView.parent != null) wm.removeView(barView)
+                  if (::rootContainer.isInitialized && rootContainer.parent != null) wm.removeView(rootContainer)
                   if (::joyView.isInitialized && joyView.parent != null) wm.removeView(joyView)
                   inst = null
               }
@@ -460,5 +622,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v2.4-APK
+          name: KhobauBot-v2.7-APK
           path: app/build/outputs/apk/debug/*.apk
