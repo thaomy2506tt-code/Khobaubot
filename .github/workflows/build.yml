@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Tao Toan Bo Du An KhobauBot
+      - name: Tao Code KhobauBot Full Feature
         run: |
           mkdir -p app/src/main/java/com/bot app/src/main/res/xml
 
@@ -68,12 +68,12 @@ jobs:
                   applicationId 'com.bot'
                   minSdk 24
                   targetSdk 33
-                  versionCode 1
-                  versionName '1.0'
+                  versionCode 2
+                  versionName '1.2'
               }
               compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
               }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -125,9 +125,7 @@ jobs:
           import android.content.Context
           import android.content.Intent
           import android.content.pm.ServiceInfo
-          import android.graphics.Color
-          import android.graphics.Path
-          import android.graphics.PixelFormat
+          import android.graphics.*
           import android.hardware.display.DisplayManager
           import android.media.ImageReader
           import android.media.projection.MediaProjection
@@ -135,27 +133,25 @@ jobs:
           import android.net.Uri
           import android.os.*
           import android.provider.Settings
-          import android.view.Gravity
-          import android.view.MotionEvent
-          import android.view.WindowManager
+          import android.view.*
           import android.view.accessibility.AccessibilityEvent
-          import android.widget.Button
-          import android.widget.Toast
+          import android.widget.*
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.app.NotificationCompat
           import kotlinx.coroutines.*
+          import kotlin.math.*
 
           class MainActivity : AppCompatActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   val btn = Button(this).apply {
-                      text = "BẬT BOT & CẤP QUYỀN"
-                      textSize = 18f
+                      text = "BẬT KHOBAUBOT & CẤP QUYỀN"
+                      textSize = 17f
                   }
                   setContentView(btn)
                   btn.setOnClickListener {
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                          Toast.makeText(this, "Cap quyen cua so noi!", Toast.LENGTH_SHORT).show()
+                          Toast.makeText(this, "Vui lòng cấp quyền Cửa sổ nổi!", Toast.LENGTH_SHORT).show()
                           startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")), 1)
                           return@setOnClickListener
                       }
@@ -184,8 +180,13 @@ jobs:
               override fun onDestroy() { super.onDestroy(); inst = null }
               override fun onAccessibilityEvent(e: AccessibilityEvent?) {}
               override fun onInterrupt() {}
-              fun swipe(x1: Float, y1: Float, x2: Float, y2: Float) {
-                  val p = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
+
+              fun moveToward(jx: Float, jy: Float, tx: Float, ty: Float) {
+                  val angle = atan2((ty - jy).toDouble(), (tx - jx).toDouble())
+                  val r = 130f
+                  val destX = jx + (r * cos(angle)).toFloat()
+                  val destY = jy + (r * sin(angle)).toFloat()
+                  val p = Path().apply { moveTo(jx, jy); lineTo(destX, destY) }
                   val stroke = GestureDescription.StrokeDescription(p, 0, 350)
                   dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
               }
@@ -194,24 +195,37 @@ jobs:
           class CaptureService : Service() {
               companion object { var inst: CaptureService? = null }
               private var mp: MediaProjection? = null
+              private var reader: ImageReader? = null
+              private var lastBmp: Bitmap? = null
+              var targetBmp: Bitmap? = null
+              var joyX = 250f
+              var joyY = 850f
               private var running = false
               private var job: Job? = null
+              private var sW = 720
+              private var sH = 1280
 
               override fun onBind(intent: Intent?): IBinder? = null
 
               override fun onCreate() {
                   super.onCreate()
                   inst = this
-                  val chId = "c1"
+                  val dm = resources.displayMetrics
+                  sW = dm.widthPixels
+                  sH = dm.heightPixels
+                  joyX = sW * 0.25f
+                  joyY = sH * 0.75f
+
+                  val chId = "cap_channel"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
-                      m?.createNotificationChannel(NotificationChannel(chId, "Cap", NotificationManager.IMPORTANCE_LOW))
+                      m?.createNotificationChannel(NotificationChannel(chId, "Bot Cap", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Running").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  val notif = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Active").setSmallIcon(android.R.drawable.ic_media_play).build()
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                      startForeground(102, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
                   } else {
-                      startForeground(1, n)
+                      startForeground(102, notif)
                   }
               }
 
@@ -223,23 +237,60 @@ jobs:
                       val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                       mp = mpm.getMediaProjection(code, data)
                       mp?.registerCallback(object : MediaProjection.Callback() {}, Handler(Looper.getMainLooper()))
-                      val dm = resources.displayMetrics
-                      val reader = ImageReader.newInstance(dm.widthPixels, dm.heightPixels, PixelFormat.RGBA_8888, 2)
-                      mp?.createVirtualDisplay("V", dm.widthPixels, dm.heightPixels, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
+                      reader = ImageReader.newInstance(sW, sH, PixelFormat.RGBA_8888, 2)
+                      mp?.createVirtualDisplay("VDisp", sW, sH, resources.displayMetrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader?.surface, null, null)
                   }
                   return START_STICKY
               }
 
-              fun toggle(): Boolean {
+              fun getLatestBitmap(): Bitmap? {
+                  val img = reader?.acquireLatestImage() ?: return lastBmp
+                  try {
+                      val plane = img.planes[0]
+                      val buf = plane.buffer
+                      val pStride = plane.pixelStride
+                      val rStride = plane.rowStride
+                      val pad = rStride - pStride * sW
+                      val bmp = Bitmap.createBitmap(sW + pad / pStride, sH, Bitmap.Config.ARGB_8888)
+                      bmp.copyPixelsFromBuffer(buf)
+                      lastBmp = if (pad > 0) Bitmap.createBitmap(bmp, 0, 0, sW, sH) else bmp
+                  } catch (_: Exception) {}
+                  finally { img.close() }
+                  return lastBmp
+              }
+
+              fun cropTarget(x: Int, y: Int, w: Int, h: Int): Boolean {
+                  val screen = getLatestBitmap() ?: return false
+                  val rx = x.coerceIn(0, screen.width - 1)
+                  val ry = y.coerceIn(0, screen.height - 1)
+                  val rw = w.coerceAtMost(screen.width - rx)
+                  val rh = h.coerceAtMost(screen.height - ry)
+                  if (rw > 10 && rh > 10) {
+                      targetBmp = Bitmap.createBitmap(screen, rx, ry, rw, rh)
+                      return true
+                  }
+                  return false
+              }
+
+              fun toggleRun(): Boolean {
                   running = !running
                   if (running) {
+                      if (targetBmp == null) {
+                          Toast.makeText(this, "Chưa cắt ảnh mục tiêu!", Toast.LENGTH_SHORT).show()
+                          running = false
+                          return false
+                      }
                       job = CoroutineScope(Dispatchers.Default).launch {
-                          val dm = resources.displayMetrics
-                          val jx = dm.widthPixels * 0.25f
-                          val jy = dm.heightPixels * 0.75f
                           while (running) {
-                              BotAccService.inst?.swipe(jx, jy, jx, jy - 150f)
-                              delay(500)
+                              val scr = getLatestBitmap()
+                              val tpl = targetBmp
+                              if (scr != null && tpl != null) {
+                                  val pt = match(scr, tpl)
+                                  if (pt != null) {
+                                      BotAccService.inst?.moveToward(joyX, joyY, pt.x, pt.y)
+                                  }
+                              }
+                              delay(400)
                           }
                       }
                   } else {
@@ -248,18 +299,66 @@ jobs:
                   return running
               }
 
+              private fun match(screen: Bitmap, tpl: Bitmap): PointF? {
+                  val scale = 0.4f
+                  val sw = (screen.width * scale).toInt()
+                  val sh = (screen.height * scale).toInt()
+                  val tw = (tpl.width * scale).toInt().coerceAtLeast(8)
+                  val th = (tpl.height * scale).toInt().coerceAtLeast(8)
+                  if (tw >= sw || th >= sh) return null
+
+                  val sBmp = Bitmap.createScaledBitmap(screen, sw, sh, false)
+                  val tBmp = Bitmap.createScaledBitmap(tpl, tw, th, false)
+                  val sp = IntArray(sw * sh)
+                  val tp = IntArray(tw * th)
+                  sBmp.getPixels(sp, 0, sw, 0, 0, sw, sh)
+                  tBmp.getPixels(tp, 0, tw, 0, 0, tw, th)
+
+                  var minDiff = Long.MAX_VALUE
+                  var bx = -1
+                  var by = -1
+                  val step = 4
+                  for (y in 0 until (sh - th) step step) {
+                      for (x in 0 until (sw - tw) step step) {
+                          var diff = 0L
+                          for (ty in 0 until th step step) {
+                              for (tx in 0 until tw step step) {
+                                  val c1 = sp[(y + ty) * sw + (x + tx)]
+                                  val c2 = tp[ty * tw + tx]
+                                  val dr = (c1 shr 16 and 0xFF) - (c2 shr 16 and 0xFF)
+                                  val dg = (c1 shr 8 and 0xFF) - (c2 shr 8 and 0xFF)
+                                  val db = (c1 and 0xFF) - (c2 and 0xFF)
+                                  diff += abs(dr) + abs(dg) + abs(db)
+                              }
+                          }
+                          if (diff < minDiff) {
+                              minDiff = diff
+                              bx = x
+                              by = y
+                          }
+                      }
+                  }
+                  val samples = (tw / step) * (th / step)
+                  val avg = if (samples > 0) minDiff / (samples * 3) else 255L
+                  return if (avg < 45 && bx >= 0) PointF((bx + tw / 2) / scale, (by + th / 2) / scale) else null
+              }
+
               override fun onDestroy() {
                   super.onDestroy()
                   running = false
                   job?.cancel()
                   mp?.stop()
+                  reader?.close()
                   inst = null
               }
           }
 
           class FloatingService : Service() {
               private lateinit var wm: WindowManager
-              private lateinit var btn: Button
+              private lateinit var barView: LinearLayout
+              private lateinit var cropBox: LinearLayout
+              private lateinit var joyView: TextView
+              private var isRunning = false
 
               override fun onBind(intent: Intent?): IBinder? = null
 
@@ -267,36 +366,144 @@ jobs:
               override fun onCreate() {
                   super.onCreate()
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                  btn = Button(this).apply {
-                      text = "START"
-                      setBackgroundColor(Color.parseColor("#2E7D32"))
-                      setTextColor(Color.WHITE)
+                  val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+                  // 1. THANH MENU NỔI (BAR)
+                  barView = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      setBackgroundColor(Color.parseColor("#CC1E1E1E"))
+                      setPadding(10, 8, 10, 8)
                   }
-                  val t = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-                  val p = WindowManager.LayoutParams(
+
+                  val btnStart = Button(this).apply {
+                      text = "START"
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#2E7D32"))
+                  }
+                  val btnCrop = Button(this).apply {
+                      text = "CẮT ẢNH"
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#1565C0"))
+                  }
+                  val btnJoy = Button(this).apply {
+                      text = "JOY"
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#E65100"))
+                  }
+                  val btnClose = Button(this).apply {
+                      text = "X"
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#C62828"))
+                  }
+
+                  barView.addView(btnStart)
+                  barView.addView(btnCrop)
+                  barView.addView(btnJoy)
+                  barView.addView(btnClose)
+
+                  val pBar = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.WRAP_CONTENT,
                       WindowManager.LayoutParams.WRAP_CONTENT,
-                      t,
+                      type,
                       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                       PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.TOP or Gravity.START
-                      x = 100
-                      y = 200
-                  }
-                  wm.addView(btn, p)
+                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 50; y = 150 }
+                  wm.addView(barView, pBar)
 
-                  btn.setOnClickListener {
-                      val active = CaptureService.inst?.toggle() ?: false
-                      btn.text = if (active) "STOP" else "START"
-                      btn.setBackgroundColor(if (active) Color.RED else Color.parseColor("#2E7D32"))
+                  // 2. KHUNG NGẮM CẮT ẢNH (CROP BOX)
+                  val pCrop = WindowManager.LayoutParams(
+                      300, 300, type,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 200; y = 300 }
+
+                  cropBox = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setBackgroundColor(Color.parseColor("#55FF0000"))
+                      gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                  }
+                  val btnSaveCrop = Button(this).apply {
+                      text = "LƯU ẢNH NÀY"
+                      setBackgroundColor(Color.parseColor("#FFD600"))
+                      setTextColor(Color.BLACK)
+                  }
+                  cropBox.addView(btnSaveCrop)
+
+                  // 3. ĐIỂM ĐẶT JOYSTICK (JOY MARKER)
+                  val pJoy = WindowManager.LayoutParams(
+                      160, 160, type,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 150; y = 800 }
+
+                  joyView = TextView(this).apply {
+                      text = "JOY\n(Chạm chốt)"
+                      gravity = Gravity.CENTER
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#8800E676"))
                   }
 
-                  var ix = 0; var iy = 0; var tx = 0f; var ty = 0f
-                  btn.setOnTouchListener { _, e ->
+                  // SỰ KIỆN NÚT
+                  btnStart.setOnClickListener {
+                      val active = CaptureService.inst?.toggleRun() ?: false
+                      isRunning = active
+                      btnStart.text = if (active) "STOP" else "START"
+                      btnStart.setBackgroundColor(if (active) Color.RED else Color.parseColor("#2E7D32"))
+                  }
+
+                  btnCrop.setOnClickListener {
+                      if (cropBox.parent == null) wm.addView(cropBox, pCrop) else wm.removeView(cropBox)
+                  }
+
+                  btnSaveCrop.setOnClickListener {
+                      val loc = IntArray(2)
+                      cropBox.getLocationOnScreen(loc)
+                      val ok = CaptureService.inst?.cropTarget(loc[0], loc[1], cropBox.width, cropBox.height) ?: false
+                      if (ok) Toast.makeText(this, "Đã lưu ảnh mục tiêu thành công!", Toast.LENGTH_SHORT).show()
+                      if (cropBox.parent != null) wm.removeView(cropBox)
+                  }
+
+                  btnJoy.setOnClickListener {
+                      if (joyView.parent == null) wm.addView(joyView, pJoy) else wm.removeView(joyView)
+                  }
+
+                  joyView.setOnClickListener {
+                      val loc = IntArray(2)
+                      joyView.getLocationOnScreen(loc)
+                      CaptureService.inst?.joyX = loc[0] + joyView.width / 2f
+                      CaptureService.inst?.joyY = loc[1] + joyView.height / 2f
+                      Toast.makeText(this, "Đã chốt tọa độ Joystick!", Toast.LENGTH_SHORT).show()
+                      if (joyView.parent != null) wm.removeView(joyView)
+                  }
+
+                  btnClose.setOnClickListener { stopSelf() }
+
+                  // KÉO THẢ THANH BAR
+                  var bx = 0; var by = 0; var btx = 0f; var bty = 0f
+                  barView.setOnTouchListener { _, e ->
                       when (e.action) {
-                          MotionEvent.ACTION_DOWN -> { ix = p.x; iy = p.y; tx = e.rawX; ty = e.rawY; false }
-                          MotionEvent.ACTION_MOVE -> { p.x = ix + (e.rawX - tx).toInt(); p.y = iy + (e.rawY - ty).toInt(); wm.updateViewLayout(btn, p); true }
+                          MotionEvent.ACTION_DOWN -> { bx = pBar.x; by = pBar.y; btx = e.rawX; bty = e.rawY; false }
+                          MotionEvent.ACTION_MOVE -> { pBar.x = bx + (e.rawX - btx).toInt(); pBar.y = by + (e.rawY - bty).toInt(); wm.updateViewLayout(barView, pBar); true }
+                          else -> false
+                      }
+                  }
+
+                  // KÉO THẢ KHUNG CẮT
+                  var cx = 0; var cy = 0; var ctx = 0f; var cty = 0f
+                  cropBox.setOnTouchListener { _, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> { cx = pCrop.x; cy = pCrop.y; ctx = e.rawX; cty = e.rawY; false }
+                          MotionEvent.ACTION_MOVE -> { pCrop.x = cx + (e.rawX - ctx).toInt(); pCrop.y = cy + (e.rawY - cty).toInt(); wm.updateViewLayout(cropBox, pCrop); true }
+                          else -> false
+                      }
+                  }
+
+                  // KÉO THẢ ĐIỂM JOYSTICK
+                  var jx = 0; var jy = 0; var jtx = 0f; var jty = 0f
+                  joyView.setOnTouchListener { _, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> { jx = pJoy.x; jy = pJoy.y; jtx = e.rawX; jty = e.rawY; false }
+                          MotionEvent.ACTION_MOVE -> { pJoy.x = jx + (e.rawX - jtx).toInt(); pJoy.y = jy + (e.rawY - jty).toInt(); wm.updateViewLayout(joyView, pJoy); true }
                           else -> false
                       }
                   }
@@ -304,7 +511,9 @@ jobs:
 
               override fun onDestroy() {
                   super.onDestroy()
-                  if (::btn.isInitialized) wm.removeView(btn)
+                  if (::barView.isInitialized && barView.parent != null) wm.removeView(barView)
+                  if (::cropBox.isInitialized && cropBox.parent != null) wm.removeView(cropBox)
+                  if (::joyView.isInitialized && joyView.parent != null) wm.removeView(joyView)
               }
           }
           EOF
@@ -317,5 +526,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-APK
+          name: KhobauBot-v1.2-APK
           path: app/build/outputs/apk/debug/*.apk
