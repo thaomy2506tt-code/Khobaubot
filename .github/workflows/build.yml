@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 32; versionName '4.2' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 33; versionName '4.3' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -139,9 +139,9 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
-              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, px: Float, py: Float, dMs: Long = 240) {
+              fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, px: Float, py: Float, dMs: Long = 230) {
                   val angle = atan2((ty - py).toDouble(), (tx - px).toDouble())
-                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (130f * cos(angle)).toFloat(), jy + (130f * sin(angle)).toFloat()) }
+                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (120f * cos(angle)).toFloat(), jy + (120f * sin(angle)).toFloat()) }
                   dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, dMs)).build(), null, null)
               }
           }
@@ -185,15 +185,19 @@ jobs:
               private var mp: MediaProjection? = null
               private var reader: ImageReader? = null
               private var lastBmp: Bitmap? = null
-              var joyX = 250f; var joyY = 850f
-              var enableHuntMonster = false // MẶC ĐỊNH TẮT SĂN QUÁI ĐỂ CÀY Ô MƯỢT 100%
+
+              var joyX = 360f
+              var joyY = 820f
+              var enableHuntMonster = false
 
               private var dispFromAnchorX = 0f
               private var dispFromAnchorY = 0f
-              private var playerPos = PointF(360f, 640f)
 
-              private var lockedTile: PointF? = null
-              private var lockedTileStartTime = 0L
+              // STATE MACHINE
+              private var isMining = false
+              private var mineTargetX = 0f
+              private var mineTargetY = 0f
+              private var mineStartTime = 0L
               private val skippedTiles = mutableListOf<Pair<PointF, Long>>()
 
               private var running = false; private var job: Job? = null
@@ -209,16 +213,17 @@ jobs:
                   super.onCreate()
                   inst = this
                   val dm = resources.displayMetrics; sW = dm.widthPixels; sH = dm.heightPixels
-                  joyX = sW * 0.22f; joyY = sH * 0.75f
-                  playerPos = PointF(sW * 0.5f, sH * 0.48f)
+                  // MẶC ĐỊNH JOYSTICK CHUẨN XÁC THEO MÀN HÌNH GAME UGPHONE
+                  joyX = sW * 0.5f
+                  joyY = sH * 0.64f
 
-                  val chId = "bot_v42"
+                  val chId = "bot_v43"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.2 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(132, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(132, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.3 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(133, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(133, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -237,7 +242,7 @@ jobs:
 
               fun resetAnchor() {
                   dispFromAnchorX = 0f; dispFromAnchorY = 0f
-                  lockedTile = null; skippedTiles.clear()
+                  isMining = false; skippedTiles.clear()
                   Toast.makeText(this, "Đã chốt GỐC 7x9 ô tại vị trí này!", Toast.LENGTH_SHORT).show()
               }
 
@@ -262,51 +267,6 @@ jobs:
                   return lastBmp
               }
 
-              private fun detectUniversalPlayer(scr: Bitmap, curX: Float, curY: Float): PointF {
-                  val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
-                  val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val pxs = IntArray(sw * sh); bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
-
-                  val searchRadius = (160f * sc).toInt()
-                  val cX = (curX * sc).toInt().coerceIn(searchRadius, sw - searchRadius)
-                  val cY = (curY * sc).toInt().coerceIn(searchRadius, sh - searchRadius)
-
-                  var bestX = -1; var bestY = -1; var maxStreak = 0
-                  val minY = (cY - searchRadius).coerceAtLeast((sh * 0.10f).toInt())
-                  val maxY = (cY + searchRadius).coerceAtMost((sh * 0.90f).toInt())
-                  val minX = (cX - searchRadius).coerceAtLeast((sw * 0.08f).toInt())
-                  val maxX = (cX + searchRadius).coerceAtMost((sw * 0.92f).toInt())
-
-                  for (y in minY until maxY step 2) {
-                      var currentStreak = 0; var streakStartX = 0
-                      for (x in minX until maxX) {
-                          val c = pxs[y * sw + x]
-                          val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                          val isNameChar = (r > 195 && g > 195 && b > 180 && abs(r - g) < 22)
-                          if (isNameChar) {
-                              if (currentStreak == 0) streakStartX = x
-                              currentStreak++
-                          } else {
-                              if (currentStreak in 8..55) {
-                                  val upY = (y - 1).coerceAtLeast(0); val downY = (y + 1).coerceAtMost(sh - 1)
-                                  val isBorderDark = ((pxs[upY * sw + (streakStartX + currentStreak / 2)] shr 16 and 0xFF) < 65) ||
-                                                     ((pxs[downY * sw + (streakStartX + currentStreak / 2)] shr 16 and 0xFF) < 65)
-                                  if (isBorderDark && currentStreak > maxStreak) {
-                                      maxStreak = currentStreak
-                                      bestX = streakStartX + currentStreak / 2
-                                      bestY = y
-                                  }
-                              }
-                              currentStreak = 0
-                          }
-                      }
-                  }
-                  if (bestX != -1 && bestY != -1) {
-                      return PointF(bestX / sc, (bestY / sc) + 1.15f * tileH)
-                  }
-                  return PointF(sW * 0.5f, sH * 0.48f)
-              }
-
               fun toggleRun(): Boolean {
                   running = !running
                   if (running) {
@@ -317,86 +277,90 @@ jobs:
                               val scr = getScreen()
                               if (scr == null) { delay(80); continue }
 
-                              playerPos = detectUniversalPlayer(scr, playerPos.x, playerPos.y)
-                              val px = playerPos.x; val py = playerPos.y
+                              // NHÂN VẬT LUÔN CỐ ĐỊNH Ở GẦN TÂM DO CAMERA CUỘN BÁM THEO
+                              val px = sW * 0.5f
+                              val py = sH * 0.44f
 
-                              // 1. CHỈ SĂN QUÁI NẾU NGƯỜI DÙNG BẬT CÔNG TẮC
+                              // 1. SĂN QUÁI (CHỈ KHI BẬT VÀ PHẢI NGOÀI BÁN KÍNH 75px TRÁNH ÁO CHOÀNG ĐỎ)
                               if (enableHuntMonster) {
                                   val monsterPt = findMonsterSafe(scr, px, py)
                                   if (monsterPt != null) {
-                                      lockedTile = null
+                                      isMining = false
                                       val mBox = RectF(monsterPt.x - 28f, monsterPt.y - 12f, monsterPt.x + 28f, monsterPt.y + 45f)
                                       FloatingService.inst?.updateHUD(mBox, null, "")
-                                      BotAccService.inst?.walkToward(joyX, joyY, monsterPt.x, monsterPt.y, px, py, 240)
+                                      BotAccService.inst?.walkToward(joyX, joyY, monsterPt.x, monsterPt.y, px, py, 230)
                                       delay(230); continue
                                   }
                               }
 
-                              // 2. KHÓA PHẠM VI AN TOÀN 7 Ô NGANG VÀ 9 Ô DỌC
+                              // 2. KHÓA BÁN KÍNH AN TOÀN QUANH GỐC (7 Ô NGANG, 9 Ô DỌC)
                               if (abs(dispFromAnchorX) >= maxSafeX || abs(dispFromAnchorY) >= maxSafeY) {
-                                  lockedTile = null
+                                  isMining = false
                                   FloatingService.inst?.updateHUD(null, null, "QUAY VỀ GỐC")
                                   val backAng = atan2(-dispFromAnchorY.toDouble(), -dispFromAnchorX.toDouble())
                                   val stepMove = tileW * 0.85f
-                                  BotAccService.inst?.walkToward(joyX, joyY, px + (stepMove * cos(backAng)).toFloat(), py + (stepMove * sin(backAng)).toFloat(), px, py, 280)
+                                  BotAccService.inst?.walkToward(joyX, joyY, px + (stepMove * cos(backAng)).toFloat(), py + (stepMove * sin(backAng)).toFloat(), px, py, 260)
                                   dispFromAnchorX += (stepMove * cos(backAng)).toFloat()
                                   dispFromAnchorY += (stepMove * sin(backAng)).toFloat()
-                                  delay(290); continue
+                                  delay(270); continue
                               }
 
-                              // 3. TIẾN TRÌNH XỬ LÝ Ô ĐẤT ĐÃ KHÓA
-                              if (lockedTile != null) {
-                                  val tPt = lockedTile!!
-                                  val isStillAlive = isTileStillAliveAt(scr, tPt.x, tPt.y)
-                                  val isTimeout = (System.currentTimeMillis() - lockedTileStartTime) > 5000L
+                              // 3. TIẾN TRÌNH ĐẬP ĐÁ (STATE_MINE: THẢ JOYSTICK ĐỨNG YÊN ĐẬP ĐÁ)
+                              if (isMining) {
+                                  val tBox = RectF(mineTargetX - 26f, mineTargetY - 26f, mineTargetX + 26f, mineTargetY + 26f)
+                                  val isBroken = isTileBroken(scr, mineTargetX, mineTargetY)
+                                  val isTimeout = (System.currentTimeMillis() - mineStartTime) > 4000L
 
-                                  if (!isStillAlive) {
-                                      // Ô ĐÃ BỊ ĐẬP VỠ HOÀN TOÀN
-                                      lockedTile = null
+                                  if (isBroken) {
+                                      // Ô ĐÃ VỠ THÀNH CỎ: LẬP TỨC TÌM Ô MỚI
+                                      isMining = false
                                       FloatingService.inst?.updateHUD(null, null, "")
                                       delay(100); continue
                                   }
 
                                   if (isTimeout) {
-                                      // QUÁ 5 GIÂY KHÔNG ĐẬP ĐƯỢC (KẸT VẬT CẢN) -> TẠM BỎ QUA Ô NÀY
-                                      skippedTiles.add(Pair(tPt, System.currentTimeMillis()))
-                                      lockedTile = null
+                                      // KẸT VẬT CẢN QUÁ 4 GIÂY: BỎ QUA Ô NÀY ĐI Ô KHÁC
+                                      skippedTiles.add(Pair(PointF(mineTargetX, mineTargetY), System.currentTimeMillis()))
+                                      isMining = false
                                       FloatingService.inst?.updateHUD(null, null, "")
                                       delay(100); continue
                                   }
 
-                                  val dist = hypot((tPt.x - px).toDouble(), (tPt.y - py).toDouble()).toFloat()
-                                  val tBox = RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f)
-
-                                  // BƯỚC THẲNG VÀO Ô ĐẤT (dist <= 25px)
-                                  if (dist <= 25f) {
-                                      // ĐÃ VÀO VỊ TRÍ: THẢ HOÀN TOÀN JOYSTICK CHO NHÂN VẬT ĐẬP
-                                      FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
-                                      delay(350); continue
-                                  } else {
-                                      // TIẾP TỤC TIẾN VÀO TÂM Ô
-                                      FloatingService.inst?.updateHUD(null, tBox, "▶ TIẾN VÀO Ô")
-                                      val ang = atan2((tPt.y - py).toDouble(), (tPt.x - px).toDouble())
-                                      val stepMove = tileW * 0.8f
-                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 240)
-
-                                      dispFromAnchorX += (stepMove * cos(ang)).toFloat()
-                                      dispFromAnchorY += (stepMove * sin(ang)).toFloat()
-                                      lockedTile = PointF(tPt.x - (stepMove * cos(ang)).toFloat(), tPt.y - (stepMove * sin(ang)).toFloat())
-
-                                      delay(260); continue
-                                  }
+                                  // THẢ JOYSTICK HOÀN TOÀN CHO GAME TỰ ĐỘNG VUNG CUỐC ĐẬP
+                                  FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
+                                  delay(250); continue
                               }
 
-                              // 4. QUÉT TÌM Ô ĐẤT GẦN NHẤT
+                              // 4. TIẾN TRÌNH DI CHUYỂN TỚI Ô ĐẤT GẦN NHẤT
                               val now = System.currentTimeMillis()
                               skippedTiles.removeAll { now - it.second > 10000L }
 
-                              val nearest = findNearestTileDynamic(scr, px, py)
-                              if (nearest != null) {
-                                  lockedTile = nearest
-                                  lockedTileStartTime = System.currentTimeMillis()
+                              val target = findNearestTile(scr, px, py)
+                              if (target != null) {
+                                  val dist = hypot((target.x - px).toDouble(), (target.y - py).toDouble()).toFloat()
+                                  val tBox = RectF(target.x - 26f, target.y - 26f, target.x + 26f, target.y + 26f)
+
+                                  // ĐÃ TIẾP CẬN SÁT MÉP Ô (< 38px): CHUYỂN SANG ĐẬP ĐÁ
+                                  if (dist <= 38f) {
+                                      isMining = true
+                                      mineTargetX = target.x
+                                      mineTargetY = target.y
+                                      mineStartTime = System.currentTimeMillis()
+                                      FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
+                                      delay(150); continue
+                                  } else {
+                                      // BƯỚC THẲNG VÀO Ô ĐẤT
+                                      FloatingService.inst?.updateHUD(null, tBox, "▶ TIẾN VÀO Ô")
+                                      val ang = atan2((target.y - py).toDouble(), (target.x - px).toDouble())
+                                      val stepMove = tileW * 0.75f
+                                      BotAccService.inst?.walkToward(joyX, joyY, target.x, target.y, px, py, 230)
+
+                                      dispFromAnchorX += (stepMove * cos(ang)).toFloat()
+                                      dispFromAnchorY += (stepMove * sin(ang)).toFloat()
+                                      delay(240); continue
+                                  }
                               } else {
+                                  // HẾT Ô TRONG BÃI: ĐỨNG CHỜ SPAWN
                                   FloatingService.inst?.updateHUD(null, null, "CHỜ SPAWN")
                                   val distFromHome = hypot(dispFromAnchorX.toDouble(), dispFromAnchorY.toDouble()).toFloat()
                                   if (distFromHome > (tileW * 0.8f)) {
@@ -416,10 +380,10 @@ jobs:
                   return running
               }
 
-              // QUÉT QUÁI VẬT: LOẠI TRỪ 100% VÙNG NGỰA VÀ ÁO CHOÀNG (BÁN KÍNH 70px)
+              // QUÉT QUÁI VẬT NGOÀI BÁN KÍNH 75px ĐỂ KHÔNG BẮT NHẦM ÁO CHOÀNG ĐỎ
               private fun findMonsterSafe(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val startY = (sH * 0.12f).toInt(); val endY = (sH * 0.88f).toInt()
-                  val startX = (sW * 0.08f).toInt(); val endX = (sW * 0.92f).toInt()
+                  val startY = (sH * 0.12f).toInt(); val endY = (sH * 0.70f).toInt()
+                  val startX = (sW * 0.10f).toInt(); val endX = (sW * 0.90f).toInt()
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
                   for (y in startY until endY step 3) {
@@ -440,8 +404,8 @@ jobs:
                                   val realX = (x + redLen / 2).toFloat()
                                   val realY = y + 24f
 
-                                  // VÙNG NÉ AN TOÀN TUYỆT ĐỐI: LOẠI BỎ TOÀN BỘ ÁO CHOÀNG VÀ NGỰA (< 70px)
-                                  if (hypot(realX - px, realY - py) < 70f) continue
+                                  // MIỄN NHIỄM 75px QUANH NGƯỜI
+                                  if (hypot(realX - px, realY - py) < 75f) continue
 
                                   val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
                                   val distChar = dx * dx + dy * dy
@@ -454,57 +418,61 @@ jobs:
               }
 
               private fun isTileColor(r: Int, g: Int, b: Int): Boolean {
+                  // LỌC BỎ CỎ XANH VÀ BÓNG TỐI
+                  if (g > r + 20 && g > b + 20) return false
                   if (r < 75 && g < 75 && b < 75) return false
-                  if (g > r + 18 && g > b + 18) return false
 
+                  // 1. Đất nâu nứt: R trội hơn hẳn
                   val isDirt = (r in 95..185 && g in 55..135 && b in 25..105 && r > g + 12 && g > b)
-                  val isStone = (r in 115..205 && g in 115..205 && b in 105..200 && abs(r - g) < 22 && abs(g - b) < 22 && r > 110)
+                  // 2. Đá xám quặng: Sáng đều 3 kênh
+                  val isStone = (r in 110..205 && g in 110..205 && b in 100..200 && abs(r - g) < 25 && abs(g - b) < 25 && r > 105)
+                  // 3. Bụi rêu / cỏ khô:
                   val isBush = (g in 105..185 && r in 95..170 && b in 45..130 && g >= r - 12 && r > b + 10 && g > 100)
                   return isDirt || isStone || isBush
               }
 
-              private fun isTileStillAliveAt(scr: Bitmap, sx: Float, sy: Float): Boolean {
+              // KIỂM TRA Ô ĐẤT ĐÃ VỠ THÀNH CỎ CHƯA
+              private fun isTileBroken(scr: Bitmap, sx: Float, sy: Float): Boolean {
                   val ix = sx.toInt().coerceIn(20, scr.width - 21)
                   val iy = sy.toInt().coerceIn(20, scr.height - 21)
-                  val offX = (tileW * 0.35f).toInt(); val offY = (tileH * 0.35f).toInt()
-                  val samplePoints = arrayOf(
-                      Pair(ix - offX, iy - offY), Pair(ix + offX, iy - offY),
-                      Pair(ix - offX, iy + offY), Pair(ix + offX, iy + offY)
+                  val pts = arrayOf(
+                      Pair(ix, iy),
+                      Pair(ix - 15, iy), Pair(ix + 15, iy),
+                      Pair(ix, iy - 15), Pair(ix, iy + 15)
                   )
                   var grassCount = 0
-                  for (pt in samplePoints) {
+                  for (pt in pts) {
                       val c = scr.getPixel(pt.first, pt.second)
                       val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                      if (g > r + 16 && g > b + 16) grassCount++
+                      if (g > r + 20 && g > b + 20) grassCount++
                   }
-                  return grassCount < 3
+                  // Nếu 3/5 điểm kiểm tra đã lộ cỏ xanh -> ô đã vỡ hoàn toàn
+                  return grassCount >= 3
               }
 
-              private fun findNearestTileDynamic(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
-                  val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val pxs = IntArray(sw * sh); bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
+              // QUÉT TÌM Ô ĐẤT GẦN NHẤT
+              private fun findNearestTile(scr: Bitmap, px: Float, py: Float): PointF? {
+                  val startY = (sH * 0.14f).toInt(); val endY = (sH * 0.68f).toInt()
+                  val startX = (sW * 0.12f).toInt(); val endX = (sW * 0.88f).toInt()
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
-                  val startY = (sh * 0.10f).toInt(); val endY = (sh * 0.90f).toInt()
-                  val startX = (sw * 0.08f).toInt(); val endX = (sw * 0.92f).toInt()
+                  for (y in startY until endY step 5) {
+                      for (x in startX until endX step 5) {
+                          // BỎ QUA VÙNG THÂN NGỰA VÀ BÓNG ĐEN DƯỚI CHÂN
+                          if (hypot(x - px, y - py) < 55f) continue
 
-                  for (y in startY until endY step 3) {
-                      for (x in startX until endX step 3) {
-                          val c = pxs[y * sw + x]
+                          val c = scr.getPixel(x, y)
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
                           if (isTileColor(r, g, b)) {
-                              val realX = x / sc; val realY = y / sc
-                              // Bỏ qua bóng đen dưới chân người
-                              if (hypot(realX - px, realY - py) < 22f) continue
+                              val realX = x.toFloat(); val realY = y.toFloat()
                               // Bỏ qua các ô đang kẹt
                               if (skippedTiles.any { hypot(realX - it.first.x, realY - it.first.y) < 25f }) continue
 
                               val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
-                              val distToChar = dx * dx + dy * dy
-                              if (distToChar < minD) {
-                                  minD = distToChar
+                              val dist = dx * dx + dy * dy
+                              if (dist < minD) {
+                                  minD = dist
                                   best = PointF(realX, realY)
                               }
                           }
@@ -595,7 +563,7 @@ jobs:
                   val bStart = createItemBtn("▶ START AUTO", Color.parseColor("#059669"))
                   val bGoc = createItemBtn("🎯 ĐẶT LẠI GỐC", Color.parseColor("#4F46E5"))
                   val bJoy = createItemBtn("🕹 ĐẶT JOYSTICK", Color.parseColor("#0891B2"))
-                  val bHunt = createItemBtn("⚔ QUÁI: TẮT", Color.parseColor("#4B5563")) // Mặc định tắt săn quái để cày mượt
+                  val bHunt = createItemBtn("⚔ QUÁI: TẮT", Color.parseColor("#4B5563"))
                   val bHudToggle = createItemBtn("👁 KHUNG: BẬT", Color.parseColor("#2563EB"))
 
                   val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 68).apply { topMargin = 8 }
@@ -610,7 +578,9 @@ jobs:
                   wm.addView(rootContainer, pRoot)
 
                   val pJoy = WindowManager.LayoutParams(120, 120, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
-                      gravity = Gravity.TOP or Gravity.START; x = 120; y = 750
+                      gravity = Gravity.TOP or Gravity.START
+                      x = (CaptureService.inst?.joyX?.toInt() ?: (sW / 2)) - 60
+                      y = (CaptureService.inst?.joyY?.toInt() ?: (sH * 64 / 100)) - 60
                   }
                   joyView = TextView(this).apply {
                       text = "JOY\n(Chốt)"; gravity = Gravity.CENTER; textSize = 11f; setTextColor(Color.WHITE)
@@ -627,7 +597,11 @@ jobs:
                   }
 
                   bGoc.setOnClickListener { CaptureService.inst?.resetAnchor() }
-                  bJoy.setOnClickListener { if (joyView.parent == null) wm.addView(joyView, pJoy) else wm.removeView(joyView) }
+                  bJoy.setOnClickListener {
+                      pJoy.x = (CaptureService.inst?.joyX?.toInt() ?: (sW / 2)) - 60
+                      pJoy.y = (CaptureService.inst?.joyY?.toInt() ?: (sH * 64 / 100)) - 60
+                      if (joyView.parent == null) wm.addView(joyView, pJoy) else wm.removeView(joyView)
+                  }
                   joyView.setOnClickListener {
                       val loc = IntArray(2); joyView.getLocationOnScreen(loc)
                       CaptureService.inst?.joyX = loc[0] + joyView.width / 2f
@@ -686,5 +660,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v4.2-APK
+          name: KhobauBot-v4.3-APK
           path: app/build/outputs/apk/debug/*.apk
