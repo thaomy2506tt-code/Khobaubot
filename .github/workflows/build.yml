@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 34; versionName '4.4' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 36; versionName '4.6' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -146,19 +146,20 @@ jobs:
               }
           }
 
+          // LỚP VẼ HUD DÙNG MÀU CYAN (KHÔNG BAO GIỜ BỊ NHẬN NHẦM THÀNH ĐẤT ĐÁ HAY QUÁI)
           class TrackingOverlayView(ctx: Context) : View(ctx) {
               var isHudVisible = true
               private var mR: RectF? = null
               private var tR: RectF? = null
               private var stateText: String = ""
-              private var hue = 0f
 
-              private val pBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3.5f; isAntiAlias = true }
-              private val pTxt = Paint().apply { textSize = 21f; isFakeBoldText = true; isAntiAlias = true; setShadowLayer(3f, 1f, 1f, Color.BLACK); color = Color.WHITE }
+              private val pBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 2.5f; color = Color.parseColor("#00E5FF"); isAntiAlias = true }
+              private val pMonster = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.parseColor("#FF1744"); isAntiAlias = true }
+              private val pTxt = Paint().apply { textSize = 20f; isFakeBoldText = true; isAntiAlias = true; setShadowLayer(3f, 1f, 1f, Color.BLACK); color = Color.WHITE }
 
               fun update(m: RectF?, t: RectF?, st: String) {
                   mR = m; tR = t; stateText = st
-                  hue = (hue + 16f) % 360f; postInvalidate()
+                  postInvalidate()
               }
 
               override fun onDraw(c: Canvas) {
@@ -166,14 +167,13 @@ jobs:
                   if (!isHudVisible) return
 
                   tR?.let { r ->
-                      val col = Color.HSVToColor(floatArrayOf(hue, 0.9f, 1f))
-                      pBox.color = col; c.drawRoundRect(r, 6f, 6f, pBox)
+                      c.drawRoundRect(r, 6f, 6f, pBox)
                       val ty = if (r.top - 8f > 30f) r.top - 8f else r.bottom + 26f
                       c.drawText(stateText, r.left, ty, pTxt)
                   }
 
                   mR?.let { r ->
-                      pBox.color = Color.parseColor("#FF1744"); c.drawRoundRect(r, 6f, 6f, pBox)
+                      c.drawRoundRect(r, 6f, 6f, pMonster)
                       val ty = if (r.top - 8f > 30f) r.top - 8f else 30f
                       c.drawText("⚔ DÍ QUÁI", r.left, ty, pTxt)
                   }
@@ -215,13 +215,13 @@ jobs:
                   joyX = sW * 0.5f
                   joyY = sH * 0.64f
 
-                  val chId = "bot_v44"
+                  val chId = "bot_v46"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.4 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(134, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(134, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.6 Clean").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(136, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(136, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -278,7 +278,7 @@ jobs:
                               val px = sW * 0.5f
                               val py = sH * 0.44f
 
-                              // 1. SĂN QUÁI (CHỈ KHI BẬT VÀ NGOÀI BÁN KÍNH 75px)
+                              // 1. SĂN QUÁI (CHỈ SĂN NGOÀI KHU VỰC MENU VÀ BÁN KÍNH 85px)
                               if (enableHuntMonster) {
                                   val monsterPt = findMonsterSafe(scr, px, py)
                                   if (monsterPt != null) {
@@ -302,11 +302,11 @@ jobs:
                                   delay(270); continue
                               }
 
-                              // 3. TIẾN TRÌNH ĐẬP ĐÁ (ĐỨNG YÊN ĐẬP ĐÁ)
+                              // 3. TIẾN TRÌNH ĐẬP ĐÁ (ĐỨNG YÊN ĐẬP)
                               if (isMining) {
                                   val tBox = RectF(mineTargetX - 26f, mineTargetY - 26f, mineTargetX + 26f, mineTargetY + 26f)
                                   val isBroken = isTileBroken(scr, mineTargetX, mineTargetY)
-                                  val isTimeout = (System.currentTimeMillis() - mineStartTime) > 4000L
+                                  val isTimeout = (System.currentTimeMillis() - mineStartTime) > 4500L
 
                                   if (isBroken) {
                                       isMining = false
@@ -325,16 +325,17 @@ jobs:
                                   delay(250); continue
                               }
 
-                              // 4. TIẾN TRÌNH DI CHUYỂN TỚI Ô ĐẤT GẦN NHẤT
+                              // 4. TIẾN VÀO Ô ĐẤT GẦN NHẤT
                               val now = System.currentTimeMillis()
-                              skippedTiles.removeAll { now - it.second > 10000L }
+                              skippedTiles.removeAll { now - it.second > 8000L }
 
-                              val target = findNearestTile(scr, px, py)
+                              val target = findNearestSolidTile(scr, px, py)
                               if (target != null) {
                                   val dist = hypot((target.x - px).toDouble(), (target.y - py).toDouble()).toFloat()
                                   val tBox = RectF(target.x - 26f, target.y - 26f, target.x + 26f, target.y + 26f)
 
-                                  if (dist <= 38f) {
+                                  // ĐÃ VÀO TẦM ĐẬP (dist <= 42px) -> THẢ TAY ĐẬP ĐÁ
+                                  if (dist <= 42f) {
                                       isMining = true
                                       mineTargetX = target.x
                                       mineTargetY = target.y
@@ -371,13 +372,34 @@ jobs:
                   return running
               }
 
+              // CẤM QUÉT 100% VÙNG MENU (X <= 310px, Y <= 550px)
+              private fun isInsideMenuArea(x: Float, y: Float): Boolean {
+                  return (x <= 310f && y <= (sH * 0.55f))
+              }
+
+              // CẤM QUÉT VÙNG CÂY CỔ THỤ Ở GIỮA MAP
+              private fun isCenterTree(x: Float, y: Float): Boolean {
+                  return (x in (sW * 0.38f)..(sW * 0.62f)) && (y in (sH * 0.48f)..(sH * 0.62f))
+              }
+
+              // CẤM QUÉT CƠ THỂ CIVICE, NGỰA VÀ PET RÙA
+              private fun isInsidePlayerAndPetZone(x: Float, y: Float, px: Float, py: Float): Boolean {
+                  val dx = abs(x - px)
+                  val dy = y - py
+                  return (dx <= 85f) && (dy >= -85f && dy <= 95f)
+              }
+
               private fun findMonsterSafe(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val startY = (sH * 0.12f).toInt(); val endY = (sH * 0.70f).toInt()
-                  val startX = (sW * 0.10f).toInt(); val endX = (sW * 0.90f).toInt()
+                  val startY = (sH * 0.16f).toInt(); val endY = (sH * 0.65f).toInt()
+                  val startX = (sW * 0.16f).toInt(); val endX = (sW * 0.84f).toInt()
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
                   for (y in startY until endY step 3) {
                       for (x in startX until endX step 3) {
+                          val fx = x.toFloat(); val fy = y.toFloat()
+                          if (isInsideMenuArea(fx, fy)) continue
+                          if (hypot(fx - px, fy - py) < 85f) continue
+
                           val c = scr.getPixel(x, y)
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
@@ -393,9 +415,6 @@ jobs:
                               if (redLen >= 6) {
                                   val realX = (x + redLen / 2).toFloat()
                                   val realY = y + 24f
-
-                                  if (hypot(realX - px, realY - py) < 75f) continue
-
                                   val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
                                   val distChar = dx * dx + dy * dy
                                   if (distChar < minD) { minD = distChar; best = PointF(realX, realY) }
@@ -406,54 +425,67 @@ jobs:
                   return best
               }
 
-              private fun isTileColor(r: Int, g: Int, b: Int): Boolean {
-                  if (g > r + 20 && g > b + 20) return false
+              private fun isSinglePixelTile(r: Int, g: Int, b: Int): Boolean {
+                  if (g > r + 18 && g > b + 18) return false
                   if (r < 75 && g < 75 && b < 75) return false
 
-                  val isDirt = (r in 95..185 && g in 55..135 && b in 25..105 && r > g + 12 && g > b)
-                  val isStone = (r in 110..205 && g in 110..205 && b in 100..200 && abs(r - g) < 25 && abs(g - b) < 25 && r > 105)
-                  val isBush = (g in 105..185 && r in 95..170 && b in 45..130 && g >= r - 12 && r > b + 10 && g > 100)
+                  val isDirt = (r in 110..185 && g in 65..130 && b in 25..95 && r > g + 15 && g > b + 10)
+                  val isStone = (r in 115..205 && g in 115..205 && b in 110..200 && abs(r - g) < 18 && abs(g - b) < 18 && r > 110)
+                  val isBush = (g in 120..185 && r in 105..175 && b in 45..105 && g >= r - 10 && r > b + 20)
                   return isDirt || isStone || isBush
+              }
+
+              private fun isRealTileCluster(scr: Bitmap, x: Int, y: Int): Boolean {
+                  val offsets = arrayOf(Pair(0, 0), Pair(-10, 0), Pair(10, 0), Pair(0, -10), Pair(0, 10))
+                  var matchCount = 0
+                  for (pt in offsets) {
+                      val qx = (x + pt.first).coerceIn(0, scr.width - 1)
+                      val qy = (y + pt.second).coerceIn(0, scr.height - 1)
+                      val c = scr.getPixel(qx, qy)
+                      if (isSinglePixelTile(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) matchCount++
+                  }
+                  return matchCount >= 4
               }
 
               private fun isTileBroken(scr: Bitmap, sx: Float, sy: Float): Boolean {
                   val ix = sx.toInt().coerceIn(20, scr.width - 21)
                   val iy = sy.toInt().coerceIn(20, scr.height - 21)
-                  val pts = arrayOf(
-                      Pair(ix, iy),
-                      Pair(ix - 15, iy), Pair(ix + 15, iy),
-                      Pair(ix, iy - 15), Pair(ix, iy + 15)
-                  )
+                  val pts = arrayOf(Pair(ix, iy), Pair(ix - 15, iy), Pair(ix + 15, iy), Pair(ix, iy - 15), Pair(ix, iy + 15))
                   var grassCount = 0
                   for (pt in pts) {
                       val c = scr.getPixel(pt.first, pt.second)
                       val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                      if (g > r + 20 && g > b + 20) grassCount++
+                      if (g > r + 18 && g > b + 18) grassCount++
                   }
                   return grassCount >= 3
               }
 
-              private fun findNearestTile(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val startY = (sH * 0.14f).toInt(); val endY = (sH * 0.68f).toInt()
-                  val startX = (sW * 0.12f).toInt(); val endX = (sW * 0.88f).toInt()
+              // QUÉT TÌM Ô ĐẤT THẬT (CÁCH LY HOÀN TOÀN KHU VỰC MENU)
+              private fun findNearestSolidTile(scr: Bitmap, px: Float, py: Float): PointF? {
+                  val startY = (sH * 0.16f).toInt(); val endY = (sH * 0.65f).toInt()
+                  val startX = (sW * 0.16f).toInt(); val endX = (sW * 0.84f).toInt()
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
-                  for (y in startY until endY step 5) {
-                      for (x in startX until endX step 5) {
-                          if (hypot(x - px, y - py) < 55f) continue
+                  for (y in startY until endY step 6) {
+                      for (x in startX until endX step 6) {
+                          val fx = x.toFloat(); val fy = y.toFloat()
+
+                          if (isInsideMenuArea(fx, fy)) continue // BỎ QUA MENU 100%
+                          if (isInsidePlayerAndPetZone(fx, fy, px, py)) continue
+                          if (isCenterTree(fx, fy)) continue
+                          if (skippedTiles.any { hypot(fx - it.first.x, fy - it.first.y) < 30f }) continue
 
                           val c = scr.getPixel(x, y)
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
-                          if (isTileColor(r, g, b)) {
-                              val realX = x.toFloat(); val realY = y.toFloat()
-                              if (skippedTiles.any { hypot(realX - it.first.x, realY - it.first.y) < 25f }) continue
-
-                              val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
-                              val dist = dx * dx + dy * dy
-                              if (dist < minD) {
-                                  minD = dist
-                                  best = PointF(realX, realY)
+                          if (isSinglePixelTile(r, g, b)) {
+                              if (isRealTileCluster(scr, x, y)) {
+                                  val dx = (fx - px).toDouble(); val dy = (fy - py).toDouble()
+                                  val dist = dx * dx + dy * dy
+                                  if (dist < minD) {
+                                      minD = dist
+                                      best = PointF(fx, fy)
+                                  }
                               }
                           }
                       }
@@ -647,5 +679,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v4.4-APK
+          name: KhobauBot-v4.6-APK
           path: app/build/outputs/apk/debug/*.apk
