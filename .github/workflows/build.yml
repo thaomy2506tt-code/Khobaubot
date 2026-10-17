@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 33; versionName '4.3' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 34; versionName '4.4' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -193,7 +193,6 @@ jobs:
               private var dispFromAnchorX = 0f
               private var dispFromAnchorY = 0f
 
-              // STATE MACHINE
               private var isMining = false
               private var mineTargetX = 0f
               private var mineTargetY = 0f
@@ -213,17 +212,16 @@ jobs:
                   super.onCreate()
                   inst = this
                   val dm = resources.displayMetrics; sW = dm.widthPixels; sH = dm.heightPixels
-                  // MẶC ĐỊNH JOYSTICK CHUẨN XÁC THEO MÀN HÌNH GAME UGPHONE
                   joyX = sW * 0.5f
                   joyY = sH * 0.64f
 
-                  val chId = "bot_v43"
+                  val chId = "bot_v44"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.3 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(133, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(133, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.4 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(134, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(134, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -277,11 +275,10 @@ jobs:
                               val scr = getScreen()
                               if (scr == null) { delay(80); continue }
 
-                              // NHÂN VẬT LUÔN CỐ ĐỊNH Ở GẦN TÂM DO CAMERA CUỘN BÁM THEO
                               val px = sW * 0.5f
                               val py = sH * 0.44f
 
-                              // 1. SĂN QUÁI (CHỈ KHI BẬT VÀ PHẢI NGOÀI BÁN KÍNH 75px TRÁNH ÁO CHOÀNG ĐỎ)
+                              // 1. SĂN QUÁI (CHỈ KHI BẬT VÀ NGOÀI BÁN KÍNH 75px)
                               if (enableHuntMonster) {
                                   val monsterPt = findMonsterSafe(scr, px, py)
                                   if (monsterPt != null) {
@@ -293,7 +290,7 @@ jobs:
                                   }
                               }
 
-                              // 2. KHÓA BÁN KÍNH AN TOÀN QUANH GỐC (7 Ô NGANG, 9 Ô DỌC)
+                              // 2. KHÓA PHẠM VI AN TOÀN QUANH GỐC (7 Ô NGANG, 9 Ô DỌC)
                               if (abs(dispFromAnchorX) >= maxSafeX || abs(dispFromAnchorY) >= maxSafeY) {
                                   isMining = false
                                   FloatingService.inst?.updateHUD(null, null, "QUAY VỀ GỐC")
@@ -305,28 +302,25 @@ jobs:
                                   delay(270); continue
                               }
 
-                              // 3. TIẾN TRÌNH ĐẬP ĐÁ (STATE_MINE: THẢ JOYSTICK ĐỨNG YÊN ĐẬP ĐÁ)
+                              // 3. TIẾN TRÌNH ĐẬP ĐÁ (ĐỨNG YÊN ĐẬP ĐÁ)
                               if (isMining) {
                                   val tBox = RectF(mineTargetX - 26f, mineTargetY - 26f, mineTargetX + 26f, mineTargetY + 26f)
                                   val isBroken = isTileBroken(scr, mineTargetX, mineTargetY)
                                   val isTimeout = (System.currentTimeMillis() - mineStartTime) > 4000L
 
                                   if (isBroken) {
-                                      // Ô ĐÃ VỠ THÀNH CỎ: LẬP TỨC TÌM Ô MỚI
                                       isMining = false
                                       FloatingService.inst?.updateHUD(null, null, "")
                                       delay(100); continue
                                   }
 
                                   if (isTimeout) {
-                                      // KẸT VẬT CẢN QUÁ 4 GIÂY: BỎ QUA Ô NÀY ĐI Ô KHÁC
                                       skippedTiles.add(Pair(PointF(mineTargetX, mineTargetY), System.currentTimeMillis()))
                                       isMining = false
                                       FloatingService.inst?.updateHUD(null, null, "")
                                       delay(100); continue
                                   }
 
-                                  // THẢ JOYSTICK HOÀN TOÀN CHO GAME TỰ ĐỘNG VUNG CUỐC ĐẬP
                                   FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
                                   delay(250); continue
                               }
@@ -340,7 +334,6 @@ jobs:
                                   val dist = hypot((target.x - px).toDouble(), (target.y - py).toDouble()).toFloat()
                                   val tBox = RectF(target.x - 26f, target.y - 26f, target.x + 26f, target.y + 26f)
 
-                                  // ĐÃ TIẾP CẬN SÁT MÉP Ô (< 38px): CHUYỂN SANG ĐẬP ĐÁ
                                   if (dist <= 38f) {
                                       isMining = true
                                       mineTargetX = target.x
@@ -349,7 +342,6 @@ jobs:
                                       FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
                                       delay(150); continue
                                   } else {
-                                      // BƯỚC THẲNG VÀO Ô ĐẤT
                                       FloatingService.inst?.updateHUD(null, tBox, "▶ TIẾN VÀO Ô")
                                       val ang = atan2((target.y - py).toDouble(), (target.x - px).toDouble())
                                       val stepMove = tileW * 0.75f
@@ -360,7 +352,6 @@ jobs:
                                       delay(240); continue
                                   }
                               } else {
-                                  // HẾT Ô TRONG BÃI: ĐỨNG CHỜ SPAWN
                                   FloatingService.inst?.updateHUD(null, null, "CHỜ SPAWN")
                                   val distFromHome = hypot(dispFromAnchorX.toDouble(), dispFromAnchorY.toDouble()).toFloat()
                                   if (distFromHome > (tileW * 0.8f)) {
@@ -380,7 +371,6 @@ jobs:
                   return running
               }
 
-              // QUÉT QUÁI VẬT NGOÀI BÁN KÍNH 75px ĐỂ KHÔNG BẮT NHẦM ÁO CHOÀNG ĐỎ
               private fun findMonsterSafe(scr: Bitmap, px: Float, py: Float): PointF? {
                   val startY = (sH * 0.12f).toInt(); val endY = (sH * 0.70f).toInt()
                   val startX = (sW * 0.10f).toInt(); val endX = (sW * 0.90f).toInt()
@@ -404,7 +394,6 @@ jobs:
                                   val realX = (x + redLen / 2).toFloat()
                                   val realY = y + 24f
 
-                                  // MIỄN NHIỄM 75px QUANH NGƯỜI
                                   if (hypot(realX - px, realY - py) < 75f) continue
 
                                   val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
@@ -418,20 +407,15 @@ jobs:
               }
 
               private fun isTileColor(r: Int, g: Int, b: Int): Boolean {
-                  // LỌC BỎ CỎ XANH VÀ BÓNG TỐI
                   if (g > r + 20 && g > b + 20) return false
                   if (r < 75 && g < 75 && b < 75) return false
 
-                  // 1. Đất nâu nứt: R trội hơn hẳn
                   val isDirt = (r in 95..185 && g in 55..135 && b in 25..105 && r > g + 12 && g > b)
-                  // 2. Đá xám quặng: Sáng đều 3 kênh
                   val isStone = (r in 110..205 && g in 110..205 && b in 100..200 && abs(r - g) < 25 && abs(g - b) < 25 && r > 105)
-                  // 3. Bụi rêu / cỏ khô:
                   val isBush = (g in 105..185 && r in 95..170 && b in 45..130 && g >= r - 12 && r > b + 10 && g > 100)
                   return isDirt || isStone || isBush
               }
 
-              // KIỂM TRA Ô ĐẤT ĐÃ VỠ THÀNH CỎ CHƯA
               private fun isTileBroken(scr: Bitmap, sx: Float, sy: Float): Boolean {
                   val ix = sx.toInt().coerceIn(20, scr.width - 21)
                   val iy = sy.toInt().coerceIn(20, scr.height - 21)
@@ -446,11 +430,9 @@ jobs:
                       val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
                       if (g > r + 20 && g > b + 20) grassCount++
                   }
-                  // Nếu 3/5 điểm kiểm tra đã lộ cỏ xanh -> ô đã vỡ hoàn toàn
                   return grassCount >= 3
               }
 
-              // QUÉT TÌM Ô ĐẤT GẦN NHẤT
               private fun findNearestTile(scr: Bitmap, px: Float, py: Float): PointF? {
                   val startY = (sH * 0.14f).toInt(); val endY = (sH * 0.68f).toInt()
                   val startX = (sW * 0.12f).toInt(); val endX = (sW * 0.88f).toInt()
@@ -458,7 +440,6 @@ jobs:
 
                   for (y in startY until endY step 5) {
                       for (x in startX until endX step 5) {
-                          // BỎ QUA VÙNG THÂN NGỰA VÀ BÓNG ĐEN DƯỚI CHÂN
                           if (hypot(x - px, y - py) < 55f) continue
 
                           val c = scr.getPixel(x, y)
@@ -466,7 +447,6 @@ jobs:
 
                           if (isTileColor(r, g, b)) {
                               val realX = x.toFloat(); val realY = y.toFloat()
-                              // Bỏ qua các ô đang kẹt
                               if (skippedTiles.any { hypot(realX - it.first.x, realY - it.first.y) < 25f }) continue
 
                               val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
@@ -493,6 +473,9 @@ jobs:
               private lateinit var joyView: TextView
               private lateinit var hudView: TrackingOverlayView
 
+              private var sW = 720
+              private var sH = 1280
+
               override fun onBind(i: Intent?): IBinder? = null
               fun updateHUD(m: RectF?, t: RectF?, st: String = "") {
                   if (::hudView.isInitialized) hudView.update(m, t, st)
@@ -514,6 +497,10 @@ jobs:
                   super.onCreate()
                   inst = this
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  val dm = resources.displayMetrics
+                  sW = dm.widthPixels
+                  sH = dm.heightPixels
+
                   val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
                   hudView = TrackingOverlayView(this)
@@ -660,5 +647,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v4.3-APK
+          name: KhobauBot-v4.4-APK
           path: app/build/outputs/apk/debug/*.apk
