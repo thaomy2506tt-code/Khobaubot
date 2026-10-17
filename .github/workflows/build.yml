@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 49; versionName '6.5' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 51; versionName '6.7' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -148,18 +148,19 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
-              fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 200) {
+              // Vuốt dứt khoát 150ms để bước từng nhịp vào tâm ô
+              fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 150) {
                   val p = Path().apply {
                       moveTo(jx, jy)
-                      lineTo(jx + (130f * cos(angle)).toFloat(), jy + (130f * sin(angle)).toFloat())
+                      lineTo(jx + (125f * cos(angle)).toFloat(), jy + (125f * sin(angle)).toFloat())
                   }
                   dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, dMs)).build(), null, null)
               }
           }
 
-          data class VisualTile(val id: Int, val wX: Int, val wY: Int, val isActive: Boolean, val statusText: String)
+          data class VisualTile(val id: Int, val wX: Int, val wY: Int, val isActive: Boolean, val isWaitingNext: Boolean, val statusText: String)
 
-          // VIEW HUD: TỰ ĐỘNG KHÓA VÀO TỌA ĐỘ GPS THẾ GIỚI
+          // VIEW HIỂN THỊ HUD ĐÁNH SỐ TRỰC QUAN KHÓA CỨNG VÀO LƯỚI BẢN ĐỒ
           class TrackingOverlayView(ctx: Context) : View(ctx) {
               var isHudVisible = true
               private var tileList = listOf<VisualTile>()
@@ -171,9 +172,12 @@ jobs:
               private val tileSize = 60f
 
               private val pActiveBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3.5f; color = Color.parseColor("#00E676"); isAntiAlias = true }
-              private val pWaitingBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 2.5f; color = Color.parseColor("#FFD600"); isAntiAlias = true }
+              private val pNextBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.parseColor("#FF9100"); isAntiAlias = true }
+              private val pWaitingBox = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.parseColor("#FFD600"); isAntiAlias = true }
+
               private val pBadgeActive = Paint().apply { style = Paint.Style.FILL; color = Color.parseColor("#00E676"); isAntiAlias = true }
-              private val pBadgeWaiting = Paint().apply { style = Paint.Style.FILL; color = Color.parseColor("#FFB300"); isAntiAlias = true }
+              private val pBadgeNext = Paint().apply { style = Paint.Style.FILL; color = Color.parseColor("#FF9100"); isAntiAlias = true }
+              private val pBadgeWaiting = Paint().apply { style = Paint.Style.FILL; color = Color.parseColor("#FFD600"); isAntiAlias = true }
 
               private val pNumText = Paint().apply { textSize = 20f; isFakeBoldText = true; color = Color.BLACK; textAlign = Paint.Align.CENTER; isAntiAlias = true }
               private val pStatusText = Paint().apply { textSize = 16f; isFakeBoldText = true; color = Color.WHITE; setShadowLayer(3f, 1f, 1f, Color.BLACK); isAntiAlias = true }
@@ -192,35 +196,43 @@ jobs:
                   super.onDraw(c)
                   if (!isHudVisible) return
 
-                  // VẼ TẤT CẢ CÁC Ô TỪ 1 ĐẾN 10 KHÓA CỨNG THEO ĐỘ LỆCH TỌA ĐỘ GAME
+                  // Vẽ tất cả các ô trong hàng đợi khóa cứng theo tọa độ lưới game
                   for (tile in tileList) {
                       val screenX = playerScreenX + (tile.wX - curPlayerX) * tileSize
                       val screenY = playerScreenY + (tile.wY - curPlayerY) * tileSize
 
                       val r = RectF(screenX - 28f, screenY - 28f, screenX + 28f, screenY + 28f)
-                      val isAct = tile.isActive
+                      val boxPaint = when {
+                          tile.isActive -> pActiveBox
+                          tile.isWaitingNext -> pNextBox
+                          else -> pWaitingBox
+                      }
+                      c.drawRoundRect(r, 6f, 6f, boxPaint)
 
-                      c.drawRoundRect(r, 6f, 6f, if (isAct) pActiveBox else pWaitingBox)
-
-                      // Huy hiệu số thứ tự 1..10
+                      // Vòng tròn huy hiệu số thứ tự 1..10
                       val badgeY = screenY - 33f
-                      c.drawCircle(screenX, badgeY, 15f, if (isAct) pBadgeActive else pBadgeWaiting)
+                      val badgePaint = when {
+                          tile.isActive -> pBadgeActive
+                          tile.isWaitingNext -> pBadgeNext
+                          else -> pBadgeWaiting
+                      }
+                      c.drawCircle(screenX, badgeY, 15f, badgePaint)
 
                       val numY = badgeY - ((pNumText.descent() + pNumText.ascent()) / 2f)
                       c.drawText(tile.id.toString(), screenX, numY, pNumText)
 
-                      // Hiển thị tọa độ thực tế (X, Y) dưới chân ô
+                      // Tọa độ thực tế (X, Y)
                       c.drawText("(${tile.wX},${tile.wY})", screenX, screenY + 38f, pCoordText)
 
-                      // Trạng thái ô số 1
+                      // Chữ trạng thái đếm lùi
                       if (tile.statusText.isNotEmpty()) {
                           c.drawText(tile.statusText, screenX - 32f, screenY + 54f, pStatusText)
                       }
                   }
 
-                  // Banner hiển thị GPS
+                  // Banner GPS ở trên
                   if (bannerText.isNotEmpty()) {
-                      c.drawRoundRect(20f, 65f, 650f, 130f, 12f, 12f, pBannerBg)
+                      c.drawRoundRect(20f, 65f, 660f, 130f, 12f, 12f, pBannerBg)
                       c.drawText(bannerText, 35f, 107f, pBannerText)
                   }
               }
@@ -237,20 +249,21 @@ jobs:
 
               private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-              // TỌA ĐỘ GPS THỰC TẾ TRONG GAME
+              // TỌA ĐỘ GPS THỰC TẾ
               private var currX: Int? = null
               private var currY: Int? = null
               private var homeX: Int? = null
               private var homeY: Int? = null
 
-              // DANH SÁCH HÀNG ĐỢI 10 Ô LƯU HOÀN TOÀN BẰNG TỌA ĐỘ NGUYÊN (X, Y)
+              // HÀNG ĐỢI LƯU TỌA ĐỘ (wX, wY)
               private val targetQueue = mutableListOf<Pair<Int, Int>>()
 
-              private var isMiningCurrent = false
-              private var mineStartTime = 0L
-              private var pullStartTime = 0L
+              // TRẠNG THÁI CHỜ 4 GIÂY
+              private var isWaitingAtTile1 = false
+              private var arriveStartTime = 0L
+              private var walkStartTime = 0L
 
-              // BỘ NHỚ Ô ĐÃ ĐẬP TRÁNH QUAY LẠI TRONG 15s
+              // BỘ NHỚ Ô ĐÃ ĐẬP TRÁNH QUAY LẠI TRONG 20s
               private val minedTiles = mutableMapOf<Pair<Int, Int>, Long>()
 
               private var running = false
@@ -267,13 +280,13 @@ jobs:
                   sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.5f; joyY = sH * 0.64f
 
-                  val chId = "bot_v65"
+                  val chId = "bot_v67"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Pure GPS").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(149, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(149, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot 4s Queue").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(151, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(151, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -293,8 +306,8 @@ jobs:
               fun resetHomeManually() {
                   homeX = currX; homeY = currY
                   targetQueue.clear()
-                  isMiningCurrent = false; minedTiles.clear()
-                  Toast.makeText(this, "Đã chốt Gốc GPS: ($homeX, $homeY)", Toast.LENGTH_SHORT).show()
+                  isWaitingAtTile1 = false; minedTiles.clear()
+                  Toast.makeText(this, "Đã chốt Gốc: ($homeX, $homeY)", Toast.LENGTH_SHORT).show()
               }
 
               fun stopCompletely() {
@@ -325,7 +338,7 @@ jobs:
                       }
                       homeX = null; homeY = null
                       targetQueue.clear()
-                      isMiningCurrent = false
+                      isWaitingAtTile1 = false
                       minedTiles.clear()
 
                       job = CoroutineScope(Dispatchers.Default).launch {
@@ -334,19 +347,18 @@ jobs:
                               if (scr == null) { delay(80); continue }
 
                               val px = sW * 0.5f
-                              val py = sH * 0.435f // Tọa độ tâm chân nhân vật Civice
+                              val py = sH * 0.435f // Tâm nhân vật Civice
 
-                              // 1. ĐỌC TỌA ĐỘ GPS Ở GÓC TRÊN BÊN PHẢI MÀN HÌNH
+                              // 1. ĐỌC TỌA ĐỘ GPS DÒNG QUẢ ĐỊA CẦU Ở GÓC PHẢI
                               val coord = extractCoordinates(scr)
                               if (coord != null) {
                                   currX = coord.first
                                   currY = coord.second
-                                  // Lưu gốc tự động lúc bắt đầu chạy
                                   if (homeX == null) { homeX = currX; homeY = currY }
                               }
 
                               if (currX == null || currY == null || homeX == null || homeY == null) {
-                                  FloatingService.inst?.updateHUDList(emptyList(), px, py, 0, 0, "Đang đọc GPS góc phải...")
+                                  FloatingService.inst?.updateHUDList(emptyList(), px, py, 0, 0, "Đang đọc tọa độ góc phải...")
                                   delay(120); continue
                               }
 
@@ -356,26 +368,26 @@ jobs:
                               val hY = homeY!!
                               val now = System.currentTimeMillis()
 
-                              // Dọn dẹp danh sách ô đã đập sau 15s
+                              // Dọn dẹp danh sách ô đã đập sau 20s
                               val itMined = minedTiles.iterator()
                               while (itMined.hasNext()) {
-                                  if (now - itMined.next().value > 15000L) itMined.remove()
+                                  if (now - itMined.next().value > 20000L) itMined.remove()
                               }
 
-                              // 2. GIỚI HẠN BÁN KÍNH 20 Ô SO VỚI GỐC KHỞI ĐẦU (TÍNH THEO ĐƠN VỊ TỌA ĐỘ GAME)
+                              // 2. GIỚI HẠN BÁN KÍNH 20 Ô SO VỚI GỐC KHỞI ĐẦU
                               if (abs(cX - hX) > 20 || abs(cY - hY) > 20) {
                                   targetQueue.clear()
-                                  isMiningCurrent = false
+                                  isWaitingAtTile1 = false
                                   val angle = atan2((hY - cY).toDouble(), (hX - cX).toDouble())
                                   FloatingService.inst?.updateHUDList(emptyList(), px, py, cX, cY, "VƯỢT 20 Ô! Quay về Gốc ($hX, $hY)")
-                                  BotAccService.inst?.walkToward(joyX, joyY, angle, 220)
-                                  delay(230); continue
+                                  BotAccService.inst?.walkToward(joyX, joyY, angle, 200)
+                                  delay(220); continue
                               }
 
-                              // 3. TỰ ĐỘNG QUÉT VÀ NẠP ĐỦ 10 Ô THEO TỌA ĐỘ (X, Y)
+                              // 3. TỰ ĐỘNG QUÉT VÀ NẠP ĐỦ 10 Ô VÀO HÀNG ĐỢI
                               if (targetQueue.size < 10) {
-                                  val freshList = scanGridByCoordinates(scr, px, py, cX, cY, hX, hY)
-                                  for (f in freshList) {
+                                  val fresh = scanGridCells(scr, px, py, cX, cY, hX, hY)
+                                  for (f in fresh) {
                                       if (!targetQueue.contains(f)) {
                                           targetQueue.add(f)
                                           if (targetQueue.size >= 10) break
@@ -384,7 +396,7 @@ jobs:
                               }
 
                               // Cập nhật giao diện trực quan 1..10
-                              updateVisualHUD(px, py, cX, cY)
+                              updateVisualHUD(px, py, cX, cY, now)
 
                               if (targetQueue.isEmpty()) {
                                   delay(200); continue
@@ -392,48 +404,50 @@ jobs:
 
                               // 4. MỤC TIÊU SỐ 1
                               val target = targetQueue[0]
-                              val targetX = target.first
-                              val targetY = target.second
+                              val tX = target.first
+                              val tY = target.second
 
-                              // SO SÁNH TRỰC TIẾP TỌA ĐỘ GPS: ĐÃ ĐẾN NƠI NẾU cX == targetX VÀ cY == targetY
-                              if (cX == targetX && cY == targetY || isMiningCurrent) {
-                                  if (!isMiningCurrent) {
-                                      isMiningCurrent = true
-                                      mineStartTime = System.currentTimeMillis()
+                              // KIỂM TRA ĐÃ ĐỨNG ĐÚNG TỌA ĐỘ Ô 1 (cX == tX && cY == tY)
+                              if (cX == tX && cY == tY) {
+                                  if (!isWaitingAtTile1) {
+                                      isWaitingAtTile1 = true
+                                      arriveStartTime = now
                                   }
 
-                                  val timeElapsed = System.currentTimeMillis() - mineStartTime
-                                  val isBroken = isTileBrokenToGrass(scr, px, py)
+                                  val elapsed = now - arriveStartTime
 
-                                  // Ô ĐÃ VỠ THÀNH CỎ HOẶC ĐẬP ĐỦ 3.2S -> XOAY VÒNG SANG Ô TIẾP THEO
-                                  if (isBroken || timeElapsed >= 3200L) {
+                                  // ĐÃ CHỜ ĐỦ 4 GIÂY TẠI Ô 1: HOÀN TẤT VÀ CHUYỂN SANG Ô 2
+                                  if (elapsed >= 4000L) {
                                       minedTiles[target] = now
                                       targetQueue.removeAt(0)
-                                      isMiningCurrent = false
-                                      pullStartTime = 0L
-                                      delay(80); continue
+                                      isWaitingAtTile1 = false
+                                      walkStartTime = 0L
+                                      delay(60); continue
                                   }
 
-                                  delay(240); continue
+                                  // TRONG 4 GIÂY NÀY: ĐỨNG YÊN HOÀN TOÀN, THẢ CẦN JOYSTICK
+                                  delay(200); continue
+                              } else {
+                                  // CHƯA ĐẾN TÂM Ô 1: TIẾP TỤC BƯỚC VÀO TÂM
+                                  isWaitingAtTile1 = false
+                                  if (walkStartTime == 0L) walkStartTime = now
+
+                                  // Chống kẹt vật cản: nếu đi quá 5s chưa tới -> bỏ qua ô này
+                                  if (now - walkStartTime > 5000L) {
+                                      minedTiles[target] = now
+                                      targetQueue.removeAt(0)
+                                      walkStartTime = 0L
+                                      delay(60); continue
+                                  }
+
+                                  val dX = tX - cX
+                                  val dY = tY - cY
+                                  val angle = atan2(dY.toDouble(), dX.toDouble())
+
+                                  // Bước 1 nhịp dứt khoát 150ms
+                                  BotAccService.inst?.walkToward(joyX, joyY, angle, 150)
+                                  delay(180)
                               }
-
-                              // CHƯA ĐẾN TÂM: GHÌ CHẶT JOYSTICK THEO VECTOR ĐÍCH ĐẾN CHO TỚI KHI GPS NHẢY ĐÚNG SỐ
-                              if (pullStartTime == 0L) pullStartTime = now
-                              // Chống kẹt vật cản: nếu kéo 1 ô quá 4.5s vẫn không đổi tọa độ -> bỏ qua
-                              if (now - pullStartTime > 4500L) {
-                                  minedTiles[target] = now
-                                  targetQueue.removeAt(0)
-                                  pullStartTime = 0L
-                                  delay(80); continue
-                              }
-
-                              val dX = targetX - cX
-                              val dY = targetY - cY
-                              val angle = atan2(dY.toDouble(), dX.toDouble())
-
-                              // Kéo cần liên tục và dứt khoát
-                              BotAccService.inst?.walkToward(joyX, joyY, angle, 200)
-                              delay(210)
                           }
                       }
                   } else {
@@ -443,26 +457,35 @@ jobs:
                   return running
               }
 
-              // CẬP NHẬT GIAO DIỆN KHÓA THEO TỌA ĐỘ GAME
-              private fun updateVisualHUD(px: Float, py: Float, cX: Int, cY: Int) {
+              // CẬP NHẬT GIAO DIỆN TRỰC QUAN ĐÁNH SỐ 1..10
+              private fun updateVisualHUD(px: Float, py: Float, cX: Int, cY: Int, now: Long) {
                   val vList = mutableListOf<VisualTile>()
                   for (i in 0 until targetQueue.size) {
                       val item = targetQueue[i]
                       val isAct = (i == 0)
-                      val st = if (isAct) (if (isMiningCurrent) "⛏ ĐANG ĐẬP" else "▶ ĐANG ĐẾN") else ""
-                      vList.add(VisualTile(i + 1, item.first, item.second, isAct, st))
+                      val isNext = (i == 1)
+
+                      val st = when {
+                          isAct && isWaitingAtTile1 -> {
+                              val rem = max(0.0, (4000L - (now - arriveStartTime)) / 1000.0)
+                              String.format("⛏ CHỜ 4S (%.1fs)", rem)
+                          }
+                          isAct -> "▶ ĐANG TỚI"
+                          isNext -> "⏳ CHỜ SẴN"
+                          else -> ""
+                      }
+                      vList.add(VisualTile(i + 1, item.first, item.second, isAct, isNext, st))
                   }
-                  val banner = "GPS HIỆN TẠI: ($cX, $cY) | HÀNG ĐỢI: ${targetQueue.size}/10 Ô"
+                  val banner = "GPS: ($cX, $cY) | Gốc: ($homeX, $homeY) | Hàng đợi: ${targetQueue.size}/10 ô"
                   FloatingService.inst?.updateHUDList(vList, px, py, cX, cY, banner)
               }
 
-              // OCR ĐỌC TỌA ĐỘ GPS Ở GÓC TRÊN BÊN PHẢI (CHUẨN HÓA KHUNG QUÉT UGPHONE)
+              // OCR ĐỌC TỌA ĐỘ THỰC TẾ: LUÔN LẤY DÒNG QUẢ ĐỊA CẦU Ở TRÊN CÙNG
               private fun extractCoordinates(scr: Bitmap): Pair<Int, Int>? {
                   try {
-                      // Khung quét bao phủ toàn bộ bảng đen GPS góc phải
-                      val startX = (sW * 0.68f).toInt().coerceIn(0, scr.width - 20)
-                      val startY = (sH * 0.16f).toInt().coerceIn(0, scr.height - 20)
-                      val w = (sW * 0.30f).toInt().coerceAtMost(scr.width - startX)
+                      val startX = (sW * 0.70f).toInt().coerceIn(0, scr.width - 20)
+                      val startY = (sH * 0.14f).toInt().coerceIn(0, scr.height - 20)
+                      val w = (sW * 0.28f).toInt().coerceAtMost(scr.width - startX)
                       val h = (sH * 0.14f).toInt().coerceAtMost(scr.height - startY)
 
                       val cropBmp = Bitmap.createBitmap(scr, startX, startY, w, h)
@@ -470,19 +493,26 @@ jobs:
                       val task = textRecognizer.process(image)
                       val result = Tasks.await(task, 350, TimeUnit.MILLISECONDS)
 
-                      val regex = Regex("""(-?\d+)\s*,\s*([-\s]*\d+)""")
+                      val regex = Regex("""(-?\d{1,4})\s*[,.]\s*(-?\d{1,4})""")
+                      val candidates = mutableListOf<Triple<Int, Int, Int>>() // x, y, top
+
                       for (block in result.textBlocks) {
                           for (line in block.lines) {
-                              val m = regex.find(line.text)
-                              if (m != null) {
-                                  val x = m.groupValues[1].replace(" ", "").toIntOrNull()
-                                  val y = m.groupValues[2].replace(" ", "").toIntOrNull()
-                                  // Tọa độ nhân vật hợp lệ (loại bỏ số rương lớn)
+                              val matches = regex.findAll(line.text)
+                              for (m in matches) {
+                                  val x = m.groupValues[1].toIntOrNull()
+                                  val y = m.groupValues[2].toIntOrNull()
+                                  val top = line.boundingBox?.top ?: 0
                                   if (x != null && y != null && abs(x) < 2000 && abs(y) < 2000) {
-                                      return Pair(x, y)
+                                      candidates.add(Triple(x, y, top))
                                   }
                               }
                           }
+                      }
+                      // Dòng Quả địa cầu của nhân vật luôn có tọa độ Y trên cùng (top nhỏ nhất)
+                      if (candidates.isNotEmpty()) {
+                          candidates.sortBy { it.third }
+                          return Pair(candidates[0].first, candidates[0].second)
                       }
                   } catch (_: Exception) {}
                   return null
@@ -500,7 +530,7 @@ jobs:
                   return isDirt400 || isStone900 || isMoss1100
               }
 
-              // KIỂM TRA MỘT KHỐI VUÔNG LƯỚI TẠI TỌA ĐỘ MÀN HÌNH
+              // KIỂM TRA MỘT KHỐI VUÔNG LƯỚI TẠI TỌA ĐỘ
               private fun isWikiTileAt(scr: Bitmap, cx: Float, cy: Float): Boolean {
                   val checkPoints = arrayOf(
                       Pair(0, 0), Pair(-16, -16), Pair(16, -16),
@@ -517,14 +547,13 @@ jobs:
                   return matchCount >= 6
               }
 
-              // QUÉT CÁC Ô XUNG QUANH TRỰC TIẾP THEO TỌA ĐỘ LƯỚI NGUYÊN (X, Y)
-              private fun scanGridByCoordinates(scr: Bitmap, px: Float, py: Float, cX: Int, cY: Int, hX: Int, hY: Int): List<Pair<Int, Int>> {
+              // QUÉT CÁC Ô XUNG QUANH THEO MẮT LƯỚI TỌA ĐỘ (X, Y)
+              private fun scanGridCells(scr: Bitmap, px: Float, py: Float, cX: Int, cY: Int, hX: Int, hY: Int): List<Pair<Int, Int>> {
                   val found = mutableListOf<Pair<Int, Int>>()
 
-                  // Quét theo bước nhảy lưới: từ -4 đến +4 ô quanh tọa độ nhân vật
                   for (dy in -4..4) {
                       for (dx in -4..4) {
-                          if (dx == 0 && dy == 0) continue // Bỏ qua ô đang đứng
+                          if (dx == 0 && dy == 0) continue // Bỏ qua ô nhân vật đang đứng
 
                           val wX = cX + dx
                           val wY = cY + dy
@@ -532,34 +561,19 @@ jobs:
                           if (minedTiles.containsKey(Pair(wX, wY))) continue
                           if (abs(wX - hX) > 20 || abs(wY - hY) > 20) continue
 
-                          // Vị trí kiểm tra ảnh trên màn hình tương ứng
                           val screenX = px + dx * tileSize
                           val screenY = py + dy * tileSize
 
-                          if (screenX < 60f || screenX > (sW - 60f) || screenY < (sH * 0.24f) || screenY > (sH * 0.65f)) continue
+                          if (screenX < 60f || screenX > (sW - 60f) || screenY < (sH * 0.22f) || screenY > (sH * 0.65f)) continue
 
                           if (isWikiTileAt(scr, screenX, screenY)) {
                               found.add(Pair(wX, wY))
                           }
                       }
                   }
-                  // Sắp xếp các ô gần nhất theo khoảng cách tọa độ Manhattan (|dX| + |dY|)
+                  // Sắp xếp ô gần nhân vật nhất lên trước
                   found.sortBy { abs(it.first - cX) + abs(it.second - cY) }
                   return found.take(10)
-              }
-
-              // KIỂM TRA Ô ĐÃ VỠ THÀNH CỎ CHƯA
-              private fun isTileBrokenToGrass(scr: Bitmap, px: Float, py: Float): Boolean {
-                  val ix = px.toInt().coerceIn(20, scr.width - 21)
-                  val iy = py.toInt().coerceIn(20, scr.height - 21)
-                  val pts = arrayOf(Pair(ix - 18, iy), Pair(ix + 18, iy), Pair(ix, iy - 18), Pair(ix, iy + 18))
-                  var grassCount = 0
-                  for (pt in pts) {
-                      val c = scr.getPixel(pt.first, pt.second)
-                      val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                      if (g > r + 16 && g > b + 16) grassCount++
-                  }
-                  return grassCount >= 3
               }
 
               override fun onDestroy() {
@@ -637,7 +651,7 @@ jobs:
                   }
 
                   val headerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                  val titleTv = TextView(this).apply { text = "KHOBAU PURE GPS"; textSize = 11f; setTextColor(Color.parseColor("#9CA3AF")); setPadding(6, 0, 16, 0) }
+                  val titleTv = TextView(this).apply { text = "KHOBAU 4S QUEUE"; textSize = 11f; setTextColor(Color.parseColor("#9CA3AF")); setPadding(6, 0, 16, 0) }
                   val btnMinimize = Button(this).apply {
                       text = "▲ Thu"; textSize = 10f; setTextColor(Color.WHITE)
                       background = GradientDrawable().apply { cornerRadius = 12f; setColor(Color.parseColor("#4B5563")) }
@@ -742,5 +756,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v6.5-PureGPS-APK
+          name: KhobauBot-v6.7-Queue4s-APK
           path: app/build/outputs/apk/debug/*.apk
