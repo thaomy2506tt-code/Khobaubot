@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 30; versionName '4.0' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 31; versionName '4.1' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -141,7 +141,7 @@ jobs:
 
               fun walkToward(jx: Float, jy: Float, tx: Float, ty: Float, px: Float, py: Float, dMs: Long = 260) {
                   val angle = atan2((ty - py).toDouble(), (tx - px).toDouble())
-                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (125f * cos(angle)).toFloat(), jy + (125f * sin(angle)).toFloat()) }
+                  val p = Path().apply { moveTo(jx, jy); lineTo(jx + (130f * cos(angle)).toFloat(), jy + (130f * sin(angle)).toFloat()) }
                   dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, dMs)).build(), null, null)
               }
           }
@@ -191,9 +191,10 @@ jobs:
               private var dispFromAnchorY = 0f
               private var playerPos = PointF(360f, 640f)
 
-              // KHÓA MỤC TIÊU DUY NHẤT ĐANG XỬ LÝ
+              // KHÓA MỤC TIÊU VÀ DANH SÁCH BỎ QUA Ô KẸT
               private var lockedTile: PointF? = null
-              private var lockedTileSpawnTime = 0L
+              private var lockedTileStartTime = 0L
+              private val skippedTiles = mutableListOf<Pair<PointF, Long>>()
 
               private var running = false; private var job: Job? = null
               private var sW = 720; private var sH = 1280
@@ -211,13 +212,13 @@ jobs:
                   joyX = sW * 0.22f; joyY = sH * 0.75f
                   playerPos = PointF(sW * 0.5f, sH * 0.48f)
 
-                  val chId = "bot_v40"
+                  val chId = "bot_v41"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.0 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(130, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(130, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v4.1 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(131, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(131, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -236,7 +237,7 @@ jobs:
 
               fun resetAnchor() {
                   dispFromAnchorX = 0f; dispFromAnchorY = 0f
-                  lockedTile = null
+                  lockedTile = null; skippedTiles.clear()
                   Toast.makeText(this, "Đã chốt GỐC 7x9 ô tại vị trí này!", Toast.LENGTH_SHORT).show()
               }
 
@@ -306,25 +307,6 @@ jobs:
                   return PointF(sW * 0.5f, sH * 0.48f)
               }
 
-              private fun isInsidePlayerZone(x: Float, y: Float, px: Float, py: Float): Boolean {
-                  val dx = abs(x - px); val dy = y - py
-                  return dx < (1.15f * tileW) && (dy >= -1.3f * tileH && dy <= 1.45f * tileH)
-              }
-
-              private fun hasCampfireFlameNearby(scr: Bitmap, x: Float, y: Float): Boolean {
-                  val ix = x.toInt().coerceIn(10, scr.width - 11)
-                  val iy = y.toInt().coerceIn(25, scr.height - 11)
-                  var flamePixelCount = 0
-                  for (dy in -30..5 step 5) {
-                      for (dx in -15..15 step 5) {
-                          val c = scr.getPixel(ix + dx, iy + dy)
-                          val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                          if (r > 215 && g in 135..230 && b < 65) flamePixelCount++
-                      }
-                  }
-                  return flamePixelCount >= 4
-              }
-
               fun toggleRun(): Boolean {
                   running = !running
                   if (running) {
@@ -338,17 +320,18 @@ jobs:
                               playerPos = detectUniversalPlayer(scr, playerPos.x, playerPos.y)
                               val px = playerPos.x; val py = playerPos.y
 
-                              // 1. ƯU TIÊN SỐ 1: QUÁI VẬT & BOSS CÓ THANH MÁU ĐỎ
-                              val monsterPt = findMonsterSafe(scr, px, py)
+                              // 1. ƯU TIÊN SỐ 1: BẮT QUÁI & BOSS (KỂ CẢ ĐỨNG SÁT NGƯỜI)
+                              val monsterPt = findMonsterAccurate(scr, px, py)
                               if (monsterPt != null) {
-                                  lockedTile = null // HỦY Ô ĐẤT ĐỂ TẬP TRUNG DIỆT QUÁI
+                                  lockedTile = null // Tạm dừng đập đất
                                   val mBox = RectF(monsterPt.x - 28f, monsterPt.y - 12f, monsterPt.x + 28f, monsterPt.y + 45f)
                                   FloatingService.inst?.updateHUD(mBox, null, "")
+                                  // Lao thẳng vào tâm quái
                                   BotAccService.inst?.walkToward(joyX, joyY, monsterPt.x, monsterPt.y, px, py, 260)
-                                  delay(250); continue
+                                  delay(240); continue
                               }
 
-                              // 2. KHÓA AN TOÀN 7 Ô NGANG VÀ 9 Ô DỌC QUANH GỐC
+                              // 2. KHÓA PHẠM VI AN TOÀN 7 Ô NGANG VÀ 9 Ô DỌC
                               if (abs(dispFromAnchorX) >= maxSafeX || abs(dispFromAnchorY) >= maxSafeY) {
                                   lockedTile = null
                                   FloatingService.inst?.updateHUD(null, null, "QUAY VỀ GỐC")
@@ -360,14 +343,22 @@ jobs:
                                   delay(290); continue
                               }
 
-                              // 3. TIẾN TRÌNH XỬ LÝ Ô ĐẤT ĐÃ ĐƯỢC KHÓA
+                              // 3. XỬ LÝ Ô ĐẤT ĐANG KHÓA
                               if (lockedTile != null) {
                                   val tPt = lockedTile!!
                                   val isStillAlive = isTileStillAliveAt(scr, tPt.x, tPt.y)
-                                  val isTimeout = (System.currentTimeMillis() - lockedTileSpawnTime) > 8000L
+                                  val isTimeout = (System.currentTimeMillis() - lockedTileStartTime) > 6000L
 
-                                  if (!isStillAlive || isTimeout) {
-                                      // Ô ĐÃ BỊ ĐẬP VỠ THÀNH CỎ: MỞ KHÓA MỤC TIÊU
+                                  if (!isStillAlive) {
+                                      // Ô ĐÃ BỊ ĐẬP VỠ HOÀN TOÀN
+                                      lockedTile = null
+                                      FloatingService.inst?.updateHUD(null, null, "")
+                                      delay(120); continue
+                                  }
+
+                                  if (isTimeout) {
+                                      // QUÁ 6 GIÂY KHÔNG ĐẬP ĐƯỢC (KẸT CÂY/TƯỜNG) -> BỎ QUA Ô NÀY TRONG 10S
+                                      skippedTiles.add(Pair(tPt, System.currentTimeMillis()))
                                       lockedTile = null
                                       FloatingService.inst?.updateHUD(null, null, "")
                                       delay(120); continue
@@ -376,33 +367,36 @@ jobs:
                                   val dist = hypot((tPt.x - px).toDouble(), (tPt.y - py).toDouble()).toFloat()
                                   val tBox = RectF(tPt.x - 26f, tPt.y - 26f, tPt.x + 26f, tPt.y + 26f)
 
-                                  // BÍ MẬT YOUTUBE: ĐỨNG Ở CẠNH Ô ĐẤT (0.75 Ô), KHÔNG ĐÈ LÊN Ô ĐỂ NHÂN VẬT ĐẬP
-                                  if (dist <= (tileW * 0.78f)) {
-                                      // THẢ TAY JOYSTICK HOÀN TOÀN, ĐỨNG YÊN ĐẬP ĐÁ
+                                  // BƯỚC THẲNG VÀO TÂM Ô ĐẤT (dist <= 20px)
+                                  if (dist <= 20f) {
+                                      // ĐÃ ĐỨNG ĐÈ LÊN Ô: GIỮ NHẸ HƯỚNG ĐỂ KÍCH HOẠT ĐẬP LIÊN TỤC
                                       FloatingService.inst?.updateHUD(null, tBox, "⛏ ĐANG ĐẬP...")
-                                      delay(260); continue
+                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 140)
+                                      delay(200); continue
                                   } else {
-                                      // CHƯA ĐẾN NƠI: TIẾP TỤC TIẾN TỚI CẠNH Ô
-                                      FloatingService.inst?.updateHUD(null, tBox, "▶ TIẾN TỚI Ô")
+                                      // CHƯA ĐẾN NƠI: TIẾP TỤC BƯỚC THẲNG VÀO Ô ĐẤT
+                                      FloatingService.inst?.updateHUD(null, tBox, "▶ TIẾN VÀO Ô")
                                       val ang = atan2((tPt.y - py).toDouble(), (tPt.x - px).toDouble())
                                       val stepMove = tileW * 0.8f
-                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 280)
+                                      BotAccService.inst?.walkToward(joyX, joyY, tPt.x, tPt.y, px, py, 260)
 
                                       dispFromAnchorX += (stepMove * cos(ang)).toFloat()
                                       dispFromAnchorY += (stepMove * sin(ang)).toFloat()
                                       lockedTile = PointF(tPt.x - (stepMove * cos(ang)).toFloat(), tPt.y - (stepMove * sin(ang)).toFloat())
 
-                                      delay(280); continue
+                                      delay(270); continue
                                   }
                               }
 
-                              // 4. CHƯA CÓ MỤC TIÊU: TÌM DUY NHẤT 1 Ô GẦN NHẤT ĐỂ KHÓA CHẶT
+                              // 4. QUÉT TÌM Ô ĐẤT GẦN NHẤT (LOẠI BỎ CÁC Ô ĐANG BỊ KẸT)
+                              val now = System.currentTimeMillis()
+                              skippedTiles.removeAll { now - it.second > 10000L }
+
                               val nearest = findNearestTileDynamic(scr, px, py)
                               if (nearest != null) {
                                   lockedTile = nearest
-                                  lockedTileSpawnTime = System.currentTimeMillis()
+                                  lockedTileStartTime = System.currentTimeMillis()
                               } else {
-                                  // HẾT Ô TRONG KHU VỰC: VỀ TÂM ĐỢI SPAWN
                                   FloatingService.inst?.updateHUD(null, null, "CHỜ SPAWN")
                                   val distFromHome = hypot(dispFromAnchorX.toDouble(), dispFromAnchorY.toDouble()).toFloat()
                                   if (distFromHome > (tileW * 0.8f)) {
@@ -422,31 +416,33 @@ jobs:
                   return running
               }
 
-              private fun findMonsterSafe(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val sc = 0.35f; val sw = (scr.width * sc).toInt(); val sh = (scr.height * sc).toInt()
-                  val bmp = Bitmap.createScaledBitmap(scr, sw, sh, false)
-                  val pxs = IntArray(sw * sh); bmp.getPixels(pxs, 0, sw, 0, 0, sw, sh)
+              // QUÉT VẠCH MÁU ĐỎ SẮC NÉT TRÊN ĐỘ PHÂN GIẢI GỐC
+              private fun findMonsterAccurate(scr: Bitmap, px: Float, py: Float): PointF? {
+                  val startY = (sH * 0.12f).toInt(); val endY = (sH * 0.88f).toInt()
+                  val startX = (sW * 0.08f).toInt(); val endX = (sW * 0.92f).toInt()
                   var minD = Double.MAX_VALUE; var best: PointF? = null
 
-                  val startY = (sh * 0.10f).toInt(); val endY = (sh * 0.90f).toInt()
-                  val startX = (sw * 0.08f).toInt(); val endX = (sw * 0.92f).toInt()
-
-                  for (y in startY until endY step 2) {
+                  for (y in startY until endY step 3) {
                       for (x in startX until endX step 3) {
-                          val c = pxs[y * sw + x]
+                          val c = scr.getPixel(x, y)
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                          if (r > 200 && g < 45 && b < 45) {
+
+                          // Vạch máu đỏ: R vượt trội so với G và B
+                          if (r > 165 && g < 75 && b < 75 && (r - g) > 80 && (r - b) > 80) {
                               var redLen = 0
-                              for (dx in 0..4) {
-                                  if (x + dx < sw) {
-                                      val cScan = pxs[y * sw + (x + dx)]
-                                      if ((cScan shr 16 and 0xFF) > 175 && (cScan shr 8 and 0xFF) < 55) redLen++
+                              for (dx in 0..10 step 2) {
+                                  if (x + dx < endX) {
+                                      val cScan = scr.getPixel(x + dx, y)
+                                      val rS = cScan shr 16 and 0xFF; val gS = cScan shr 8 and 0xFF
+                                      if (rS > 155 && gS < 85) redLen += 2
                                   }
                               }
-                              if (redLen >= 3) {
-                                  val realX = (x + redLen / 2) / sc; val realY = (y / sc) + 26f
-                                  if (isInsidePlayerZone(realX, realY, px, py)) continue
-                                  if (hasCampfireFlameNearby(scr, realX, realY)) continue
+                              if (redLen >= 6) {
+                                  val realX = (x + redLen / 2).toFloat()
+                                  val realY = y + 24f // Thân quái nằm dưới thanh máu
+
+                                  // Chỉ bỏ qua nếu nằm đúng tâm bờm ngựa đỏ của nhân vật (bán kính 26px)
+                                  if (hypot(realX - px, realY - py) < 26f) continue
 
                                   val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
                                   val distChar = dx * dx + dy * dy
@@ -469,25 +465,21 @@ jobs:
               }
 
               private fun isTileStillAliveAt(scr: Bitmap, sx: Float, sy: Float): Boolean {
-                  val ix = sx.toInt().coerceIn(15, scr.width - 16)
-                  val iy = sy.toInt().coerceIn(15, scr.height - 16)
-                  val offX = (tileW * 0.28f).toInt(); val offY = (tileH * 0.28f).toInt()
+                  val ix = sx.toInt().coerceIn(20, scr.width - 21)
+                  val iy = sy.toInt().coerceIn(20, scr.height - 21)
+                  val offX = (tileW * 0.35f).toInt(); val offY = (tileH * 0.35f).toInt()
                   val samplePoints = arrayOf(
                       Pair(ix - offX, iy - offY), Pair(ix + offX, iy - offY),
-                      Pair(ix - offX, iy + offY), Pair(ix + offX, iy + offY),
-                      Pair(ix - offX, iy), Pair(ix + offX, iy),
-                      Pair(ix, iy - offY), Pair(ix, iy + offY)
+                      Pair(ix - offX, iy + offY), Pair(ix + offX, iy + offY)
                   )
-                  var grassCount = 0; var tileCount = 0
+                  var grassCount = 0
                   for (pt in samplePoints) {
-                      val pxX = pt.first.coerceIn(0, scr.width - 1)
-                      val pxY = pt.second.coerceIn(0, scr.height - 1)
-                      val c = scr.getPixel(pxX, pxY)
+                      val c = scr.getPixel(pt.first, pt.second)
                       val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
-                      if (g > r + 18 && g > b + 18) grassCount++
-                      else if (isTileColor(r, g, b)) tileCount++
+                      if (g > r + 16 && g > b + 16) grassCount++
                   }
-                  return grassCount < 5 && tileCount >= 2
+                  // Nếu 3/4 góc ngoài đã lộ cỏ xanh -> ô đất đã vỡ hoàn toàn
+                  return grassCount < 3
               }
 
               private fun findNearestTileDynamic(scr: Bitmap, px: Float, py: Float): PointF? {
@@ -499,15 +491,17 @@ jobs:
                   val startY = (sh * 0.10f).toInt(); val endY = (sh * 0.90f).toInt()
                   val startX = (sw * 0.08f).toInt(); val endX = (sw * 0.92f).toInt()
 
-                  for (y in startY until endY step 4) {
-                      for (x in startX until endX step 4) {
+                  for (y in startY until endY step 3) {
+                      for (x in startX until endX step 3) {
                           val c = pxs[y * sw + x]
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
                           if (isTileColor(r, g, b)) {
                               val realX = x / sc; val realY = y / sc
-                              if (isInsidePlayerZone(realX, realY, px, py)) continue
-                              if (hasCampfireFlameNearby(scr, realX, realY)) continue
+                              // Bỏ qua bóng đen ngay dưới chân ngựa
+                              if (hypot(realX - px, realY - py) < 22f) continue
+                              // Bỏ qua các ô đang trong danh sách kẹt
+                              if (skippedTiles.any { hypot(realX - it.first.x, realY - it.first.y) < 25f }) continue
 
                               val dx = (realX - px).toDouble(); val dy = (realY - py).toDouble()
                               val distToChar = dx * dx + dy * dy
@@ -684,5 +678,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v4.0-APK
+          name: KhobauBot-v4.1-APK
           path: app/build/outputs/apk/debug/*.apk
