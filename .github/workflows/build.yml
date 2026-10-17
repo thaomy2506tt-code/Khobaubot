@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 40; versionName '5.1' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 43; versionName '5.4' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -139,8 +139,7 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
-              // Vuốt cần Joystick theo góc hướng tới mục tiêu
-              fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 220) {
+              fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 180) {
                   val p = Path().apply {
                       moveTo(jx, jy)
                       lineTo(jx + (115f * cos(angle)).toFloat(), jy + (115f * sin(angle)).toFloat())
@@ -158,10 +157,20 @@ jobs:
               var joyX = 360f
               var joyY = 820f
 
+              // TỌA ĐỘ VÀ STATE MACHINE
+              private var currentTarget: PointF? = null
+              private var targetType = 0 // 1: Quái vật, 2: Ô đất
+              private var targetArrivedTime = 0L
+              private var targetStartTime = 0L
+              private var isAtCenter = false
+
               private var running = false
               private var job: Job? = null
               private var sW = 720
               private var sH = 1280
+
+              // BÁN KÍNH QUÉT 5 Ô XUNG QUANH NHÂN VẬT (5 x 60px = 300px)
+              private val scanRadius = 300f
 
               override fun onBind(intent: Intent?): IBinder? = null
               override fun onCreate() {
@@ -169,16 +178,15 @@ jobs:
                   inst = this
                   val dm = resources.displayMetrics
                   sW = dm.widthPixels; sH = dm.heightPixels
-                  joyX = sW * 0.5f
-                  joyY = sH * 0.64f
+                  joyX = sW * 0.5f; joyY = sH * 0.64f
 
-                  val chId = "bot_v51"
+                  val chId = "bot_v54"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot Đang Chạy").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(140, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(140, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v5.4 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(143, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(143, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -221,35 +229,95 @@ jobs:
                           Toast.makeText(this, "CHƯA BẬT TRỢ NĂNG!", Toast.LENGTH_LONG).show()
                           running = false; return false
                       }
+                      currentTarget = null
+                      isAtCenter = false
                       job = CoroutineScope(Dispatchers.Default).launch {
                           while (running) {
                               val scr = getScreen()
                               if (scr == null) { delay(80); continue }
 
-                              // Tâm nhân vật trong màn hình game
+                              // Tâm nhân vật cố định ở giữa màn hình
                               val px = sW * 0.5f
                               val py = sH * 0.44f
 
-                              // 1. ƯU TIÊN SỐ 1: QUÁI VẬT (Thanh máu đỏ)
-                              val monster = findMonster(scr, px, py)
-                              // 2. NẾU KHÔNG CÓ QUÁI: TÌM Ô ĐẤT/ĐÁ GẦN NHẤT
-                              val target = monster ?: findNearestBlock(scr, px, py)
+                              val now = System.currentTimeMillis()
 
-                              if (target != null) {
-                                  val dist = hypot((target.x - px).toDouble(), (target.y - py).toDouble()).toFloat()
+                              // 1. ƯU TIÊN SỐ 1: QUÁI VẬT TRONG BÁN KÍNH 5 Ô
+                              val monster = findMonsterInRadius(scr, px, py, scanRadius)
+                              if (monster != null) {
+                                  currentTarget = monster
+                                  targetType = 1
+                                  val distM = hypot((monster.x - px).toDouble(), (monster.y - py).toDouble()).toFloat()
 
-                                  if (dist > 28f) {
-                                      // CHƯA TỚI NƠI: Kéo Joystick chạy thẳng tới mục tiêu
-                                      val angle = atan2((target.y - py).toDouble(), (target.x - px).toDouble())
-                                      BotAccService.inst?.walkToward(joyX, joyY, angle, 220)
-                                      delay(230)
+                                  if (distM > 35f) {
+                                      val angle = atan2((monster.y - py).toDouble(), (monster.x - px).toDouble())
+                                      BotAccService.inst?.walkToward(joyX, joyY, angle, 180)
+                                      delay(190); continue
                                   } else {
-                                      // ĐÃ TỚI NƠI: Thả hoàn toàn Joystick để nhân vật đứng yên đập đá / chém quái
-                                      delay(300)
+                                      // Đã đến con quái: Thả cần đứng yên chém
+                                      delay(260); continue
                                   }
+                              }
+
+                              // 2. XỬ LÝ Ô ĐẤT ĐANG KHÓA (TIẾN VÀO TRUNG TÂM VÀ ĐẬP 3S)
+                              if (currentTarget != null && targetType == 2) {
+                                  val t = currentTarget!!
+                                  val dist = hypot((t.x - px).toDouble(), (t.y - py).toDouble()).toFloat()
+
+                                  // GIAI ĐOẠN ĐANG ĐỨNG TẠI TÂM ĐẬP ĐÁ
+                                  if (isAtCenter) {
+                                      val timeMining = now - targetArrivedTime
+                                      val isBroken = isTileBrokenToGrass(scr, t.x, t.y)
+
+                                      // ĐẬP TẦM 3S HOẶC Ô ĐÃ VỠ THÀNH CỎ: MỞ KHÓA TỨC THÌ
+                                      if (isBroken || timeMining >= 3000L) {
+                                          currentTarget = null
+                                          isAtCenter = false
+                                          delay(80); continue
+                                      }
+                                      // Tiếp tục đứng yên đập
+                                      delay(260); continue
+                                  }
+
+                                  // GIAI ĐOẠN DI CHUYỂN VÀO TRUNG TÂM Ô (dist <= 18px)
+                                  if (dist <= 18f) {
+                                      isAtCenter = true
+                                      targetArrivedTime = System.currentTimeMillis()
+                                      // THẢ TAY JOYSTICK CHO NHÂN VẬT ĐỨNG YÊN ĐẬP
+                                      delay(260); continue
+                                  } else {
+                                      // GHIM TỌA ĐỘ VÀ BÙ TRỪ CUỘN MÀN HÌNH THEO TỪNG BƯỚC CHÂN
+                                      val angle = atan2((t.y - py).toDouble(), (t.x - px).toDouble())
+                                      val isClose = dist < 35f
+                                      val stepMove = if (isClose) (dist * 0.85f) else 34f
+                                      val strokeMs = if (isClose) 120L else 180L
+
+                                      BotAccService.inst?.walkToward(joyX, joyY, angle, strokeMs)
+
+                                      // Cập nhật tọa độ ô đất trôi theo camera
+                                      val shiftedX = t.x - (stepMove * cos(angle)).toFloat()
+                                      val shiftedY = t.y - (stepMove * sin(angle)).toFloat()
+                                      currentTarget = refineTileCenter(scr, shiftedX, shiftedY) ?: PointF(shiftedX, shiftedY)
+
+                                      // Tránh kẹt quá 3.5s không vào được tâm
+                                      if (now - targetStartTime > 3500L) {
+                                          currentTarget = null
+                                          isAtCenter = false
+                                      }
+
+                                      delay(strokeMs + 20); continue
+                                  }
+                              }
+
+                              // 3. TÌM Ô ĐẤT GẦN NHẤT TRONG BÁN KÍNH 5 Ô (THEO 3 LOẠI ẢNH WIKI)
+                              val tile = findNearestTileIn5Radius(scr, px, py)
+                              if (tile != null) {
+                                  currentTarget = tile
+                                  targetType = 2
+                                  isAtCenter = false
+                                  targetStartTime = System.currentTimeMillis()
                               } else {
-                                  // Bãi trống: Đứng yên đợi tài nguyên / quái spawn ra
-                                  delay(300)
+                                  delay(250)
                               }
                           }
                       }
@@ -259,59 +327,61 @@ jobs:
                   return running
               }
 
-              // NHẬN DIỆN MÀU KHỐI TÀI NGUYÊN (Khác với nền cỏ xanh)
-              private fun isBlockColor(r: Int, g: Int, b: Int): Boolean {
-                  // Loại trừ nền cỏ xanh
-                  if (g > r + 18 && g > b + 18) return false
-                  // Loại trừ bóng đen
-                  if (r < 70 && g < 70 && b < 70) return false
+              // MÀU 3 LOẠI Ô ĐẤT WIKI (400hp, 900hp, 1100hp)
+              private fun isWikiTileColor(r: Int, g: Int, b: Int): Boolean {
+                  if (g > r + 18 && g > b + 18) return false // Loại nền cỏ xanh
+                  if (r < 70 && g < 70 && b < 70) return false // Loại bóng tối
 
-                  // 1. Khối đất nâu
-                  val isDirt = (r in 105..185 && g in 65..135 && b in 25..100 && r > g + 12 && g > b + 8)
-                  // 2. Khối đá quặng
-                  val isStone = (r in 115..210 && g in 115..210 && b in 110..205 && abs(r - g) < 20 && abs(g - b) < 20 && r > 110)
-                  // 3. Bụi rêu / rơm
-                  val isBush = (g in 115..185 && r in 100..175 && b in 40..110 && g >= r - 12 && r > b + 20)
+                  val isDirt400 = (r in 110..185 && g in 65..135 && b in 25..100 && r > g + 12 && g > b + 6)
+                  val isStone900 = (r in 115..215 && g in 115..215 && b in 110..210 && abs(r - g) < 20 && abs(g - b) < 20 && r > 110)
+                  val isMoss1100 = (g in 115..190 && r in 100..175 && b in 40..110 && g >= r - 12 && r > b + 20)
 
-                  return isDirt || isStone || isBush
+                  return isDirt400 || isStone900 || isMoss1100
               }
 
-              // Xác thực cụm khối thật (tránh đốm màu lẻ tẻ)
-              private fun isRealBlock(scr: Bitmap, x: Int, y: Int): Boolean {
-                  val offsets = arrayOf(Pair(0, 0), Pair(-8, 0), Pair(8, 0), Pair(0, -8), Pair(0, 8))
-                  var count = 0
-                  for (pt in offsets) {
-                      val qx = (x + pt.first).coerceIn(0, scr.width - 1)
-                      val qy = (y + pt.second).coerceIn(0, scr.height - 1)
+              // KIỂM TRA KHỐI Ô VUÔNG 60x60 PIXEL ĐẶC (ĐÚNG SIZE RESIZE TRONG GAME)
+              private fun isSolidSquare60(scr: Bitmap, cx: Int, cy: Int): Boolean {
+                  val checkPoints = arrayOf(
+                      Pair(0, 0),
+                      Pair(-16, -16), Pair(16, -16),
+                      Pair(-16, 16), Pair(16, 16),
+                      Pair(-16, 0), Pair(16, 0),
+                      Pair(0, -16), Pair(0, 16)
+                  )
+                  var matchCount = 0
+                  for (pt in checkPoints) {
+                      val qx = (cx + pt.first).coerceIn(0, scr.width - 1)
+                      val qy = (cy + pt.second).coerceIn(0, scr.height - 1)
                       val c = scr.getPixel(qx, qy)
-                      if (isBlockColor(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) count++
+                      if (isWikiTileColor(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) matchCount++
                   }
-                  return count >= 4
+                  return matchCount >= 7
               }
 
-              // Tìm ô đất gần nhân vật nhất
-              private fun findNearestBlock(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val startY = (sH * 0.16f).toInt(); val endY = (sH * 0.62f).toInt()
-                  val startX = (sW * 0.12f).toInt(); val endX = (sW * 0.88f).toInt()
+              // QUÉT Ô TRONG BÁN KÍNH 5 Ô (NGANG, DỌC, CHÉO: hypot <= 300px)
+              private fun findNearestTileIn5Radius(scr: Bitmap, px: Float, py: Float): PointF? {
                   var minD = Double.MAX_VALUE; var best: PointF? = null
+                  val rInt = scanRadius.toInt()
 
-                  for (y in startY until endY step 8) {
-                      for (x in startX until endX step 8) {
+                  val startX = (px - rInt).toInt().coerceIn(120, scr.width - 120)
+                  val endX = (px + rInt).toInt().coerceIn(120, scr.width - 120)
+                  val startY = (py - rInt).toInt().coerceIn((sH * 0.22f).toInt(), (sH * 0.65f).toInt())
+                  val endY = (py + rInt).toInt().coerceIn((sH * 0.22f).toInt(), (sH * 0.65f).toInt())
+
+                  for (y in startY until endY step 10) {
+                      for (x in startX until endX step 10) {
                           val fx = x.toFloat(); val fy = y.toFloat()
-
-                          // Tránh cơ thể người cưỡi ngựa (bán kính 40px)
                           val distToPlayer = hypot((fx - px).toDouble(), (fy - py).toDouble())
-                          if (distToPlayer < 40.0) continue
 
-                          // Tránh thân cây to ở giữa map
-                          if (fx in (sW * 0.40f)..(sW * 0.60f) && fy in (sH * 0.50f)..(sH * 0.60f)) continue
+                          // CHỈ LẤY TRONG BÁN KÍNH 5 Ô (<= 300px) VÀ BỎ QUA NGƯỜI ĐANG ĐỨNG
+                          if (distToPlayer > scanRadius || distToPlayer < 35.0) continue
 
                           val c = scr.getPixel(x, y)
-                          if (isBlockColor(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) {
-                              if (isRealBlock(scr, x, y)) {
+                          if (isWikiTileColor(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) {
+                              if (isSolidSquare60(scr, x, y)) {
                                   if (distToPlayer < minD) {
                                       minD = distToPlayer
-                                      best = PointF(fx, fy)
+                                      best = PointF(fx, fy) // Tâm ô đất
                                   }
                               }
                           }
@@ -320,23 +390,56 @@ jobs:
                   return best
               }
 
-              // Tìm quái vật qua thanh máu đỏ
-              private fun findMonster(scr: Bitmap, px: Float, py: Float): PointF? {
-                  val startY = (sH * 0.16f).toInt(); val endY = (sH * 0.64f).toInt()
-                  val startX = (sW * 0.10f).toInt(); val endX = (sW * 0.90f).toInt()
+              // GHIM LẠI TÂM Ô ĐẤT KHI MÀN HÌNH TRÔI
+              private fun refineTileCenter(scr: Bitmap, cx: Float, cy: Float): PointF? {
+                  for (dy in -15..15 step 5) {
+                      for (dx in -15..15 step 5) {
+                          val qx = (cx + dx).toInt().coerceIn(0, scr.width - 1)
+                          val qy = (cy + dy).toInt().coerceIn(0, scr.height - 1)
+                          val c = scr.getPixel(qx, qy)
+                          if (isWikiTileColor(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)) {
+                              if (isSolidSquare60(scr, qx, qy)) return PointF(qx.toFloat(), qy.toFloat())
+                          }
+                      }
+                  }
+                  return null
+              }
+
+              // KIỂM TRA Ô ĐÃ VỠ THÀNH CỎ XANH CHƯA
+              private fun isTileBrokenToGrass(scr: Bitmap, cx: Float, cy: Float): Boolean {
+                  val ix = cx.toInt().coerceIn(20, scr.width - 21)
+                  val iy = cy.toInt().coerceIn(20, scr.height - 21)
+                  val pts = arrayOf(Pair(ix - 18, iy), Pair(ix + 18, iy), Pair(ix, iy - 18), Pair(ix, iy + 18))
+                  var grassCount = 0
+                  for (pt in pts) {
+                      val c = scr.getPixel(pt.first, pt.second)
+                      val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
+                      if (g > r + 16 && g > b + 16) grassCount++
+                  }
+                  return grassCount >= 3
+              }
+
+              // QUÉT QUÁI TRONG BÁN KÍNH 5 Ô
+              private fun findMonsterInRadius(scr: Bitmap, px: Float, py: Float, rMax: Float): PointF? {
                   var minD = Double.MAX_VALUE; var best: PointF? = null
+                  val rInt = rMax.toInt()
+
+                  val startX = (px - rInt).toInt().coerceIn(120, scr.width - 120)
+                  val endX = (px + rInt).toInt().coerceIn(120, scr.width - 120)
+                  val startY = (py - rInt).toInt().coerceIn((sH * 0.22f).toInt(), (sH * 0.65f).toInt())
+                  val endY = (py + rInt).toInt().coerceIn((sH * 0.22f).toInt(), (sH * 0.65f).toInt())
 
                   for (y in startY until endY step 3) {
                       for (x in startX until endX step 3) {
                           val fx = x.toFloat(); val fy = y.toFloat()
-                          // Bỏ qua vùng cơ thể người và ngựa (65px)
-                          if (hypot((fx - px).toDouble(), (fy - py).toDouble()) < 65.0) continue
+                          val dist = hypot((fx - px).toDouble(), (fy - py).toDouble())
+                          if (dist > rMax || dist < 65.0) continue
 
                           val c = scr.getPixel(x, y)
                           val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
 
-                          // Thanh máu đỏ của quái vật
-                          if (r > 180 && g < 55 && b < 55 && (r - g) > 100 && (r - b) > 100) {
+                          // Vạch máu đỏ của quái vật
+                          if (r > 175 && g < 60 && b < 60 && (r - g) > 90 && (r - b) > 90) {
                               var redLen = 0
                               for (dx in 0..12 step 2) {
                                   if (x + dx < endX) {
@@ -347,8 +450,7 @@ jobs:
                               }
                               if (redLen >= 6) {
                                   val realX = fx + redLen / 2f
-                                  val realY = fy + 24f // Thân quái nằm ngay dưới thanh máu
-                                  val dist = hypot((realX - px).toDouble(), (realY - py).toDouble())
+                                  val realY = fy + 24f
                                   if (dist < minD) {
                                       minD = dist
                                       best = PointF(realX, realY)
@@ -515,5 +617,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v5.1-APK
+          name: KhobauBot-v5.4-APK
           path: app/build/outputs/apk/debug/*.apk
