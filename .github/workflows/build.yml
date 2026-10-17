@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 52; versionName '6.8' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 53; versionName '7.0' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -148,6 +148,7 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
+              // Vuốt dứt khoát 150ms để kéo nhân vật đi từng bước
               fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 150) {
                   val p = Path().apply {
                       moveTo(jx, jy)
@@ -159,7 +160,7 @@ jobs:
 
           data class VisualTile(val id: Int, val wX: Int, val wY: Int, val isActive: Boolean, val statusText: String)
 
-          // VIEW HIỂN THỊ HUD ĐÁNH SỐ TRỰC QUAN Ô 1 VÀ Ô 2
+          // VIEW HIỂN THỊ TRỰC QUAN KHÓA CỨNG Ô 1 VÀ Ô 2
           class TrackingOverlayView(ctx: Context) : View(ctx) {
               var isHudVisible = true
               private var tileList = listOf<VisualTile>()
@@ -198,21 +199,16 @@ jobs:
                       val screenY = playerScreenY + (tile.wY - curPlayerY) * tileSize
 
                       val r = RectF(screenX - 28f, screenY - 28f, screenX + 28f, screenY + 28f)
-                      val boxPaint = if (tile.isActive) pActiveBox else pNextBox
-                      c.drawRoundRect(r, 6f, 6f, boxPaint)
+                      c.drawRoundRect(r, 6f, 6f, if (tile.isActive) pActiveBox else pNextBox)
 
-                      // Huy hiệu số thứ tự 1 hoặc 2
                       val badgeY = screenY - 33f
-                      val badgePaint = if (tile.isActive) pBadgeActive else pBadgeNext
-                      c.drawCircle(screenX, badgeY, 15f, badgePaint)
+                      c.drawCircle(screenX, badgeY, 15f, if (tile.isActive) pBadgeActive else pBadgeNext)
 
                       val numY = badgeY - ((pNumText.descent() + pNumText.ascent()) / 2f)
                       c.drawText(tile.id.toString(), screenX, numY, pNumText)
 
-                      // Tọa độ thực (X, Y)
                       c.drawText("(${tile.wX},${tile.wY})", screenX, screenY + 38f, pCoordText)
 
-                      // Trạng thái đếm lùi
                       if (tile.statusText.isNotEmpty()) {
                           c.drawText(tile.statusText, screenX - 32f, screenY + 54f, pStatusText)
                       }
@@ -236,19 +232,21 @@ jobs:
 
               private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
+              // BƯỚC 1 & 2: VỊ TRÍ X Y NHÂN VẬT (DÒNG QUẢ ĐỊA CẦU)
               private var currX: Int? = null
               private var currY: Int? = null
-              private var homeX: Int? = null
-              private var homeY: Int? = null
 
-              // HÀNG ĐỢI TỐI ĐA 2 Ô (wX, wY)
-              private val targetQueue = mutableListOf<Pair<Int, Int>>()
+              // BƯỚC 3: DANH SÁCH 2 Ô ĐÃ ĐỊNH VỊ TỌA ĐỘ TRONG GAME
+              private var tile1: Pair<Int, Int>? = null
+              private var tile2: Pair<Int, Int>? = null
 
-              private var isWaitingAtTile1 = false
-              private var arriveStartTime = 0L
+              // TRẠNG THÁI TIẾN TRÌNH: 1 = Đang xử lý Ô 1, 2 = Đang xử lý Ô 2
+              private var currentStep = 1
+              private var isStandingStill = false
+              private var standStartTime = 0L
               private var walkStartTime = 0L
 
-              // BỘ NHỚ Ô ĐÃ ĐẬP TRÁNH QUAY LẠI TRONG 15s
+              // BỘ NHỚ Ô ĐÃ ĐẬP TRÁNH QUÉT LẠI TRONG 15s
               private val minedTiles = mutableMapOf<Pair<Int, Int>, Long>()
 
               private var running = false
@@ -265,13 +263,13 @@ jobs:
                   sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.5f; joyY = sH * 0.64f
 
-                  val chId = "bot_v68"
+                  val chId = "bot_v70"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot 2-Tile Loop").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(152, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(152, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v7.0 Active").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(153, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(153, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -286,13 +284,6 @@ jobs:
                       mp?.createVirtualDisplay("V", sW, sH, resources.displayMetrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader?.surface, null, null)
                   }
                   return START_STICKY
-              }
-
-              fun resetHomeManually() {
-                  homeX = currX; homeY = currY
-                  targetQueue.clear()
-                  isWaitingAtTile1 = false; minedTiles.clear()
-                  Toast.makeText(this, "Đã chốt Gốc: ($homeX, $homeY)", Toast.LENGTH_SHORT).show()
               }
 
               fun stopCompletely() {
@@ -321,9 +312,9 @@ jobs:
                           Toast.makeText(this, "CHƯA BẬT TRỢ NĂNG!", Toast.LENGTH_LONG).show()
                           running = false; return false
                       }
-                      homeX = null; homeY = null
-                      targetQueue.clear()
-                      isWaitingAtTile1 = false
+                      tile1 = null; tile2 = null
+                      currentStep = 1
+                      isStandingStill = false
                       minedTiles.clear()
 
                       job = CoroutineScope(Dispatchers.Default).launch {
@@ -334,23 +325,20 @@ jobs:
                               val px = sW * 0.5f
                               val py = sH * 0.435f
 
-                              // 1. ĐỌC TỌA ĐỘ GPS DÒNG QUẢ ĐỊA CẦU Ở GÓC PHẢI
+                              // BƯỚC 1 & 2: XÁC NHẬN VÀ KHÓA TỌA ĐỘ NHÂN VẬT THEO QUẢ CẦU
                               val coord = extractCoordinates(scr)
                               if (coord != null) {
                                   currX = coord.first
                                   currY = coord.second
-                                  if (homeX == null) { homeX = currX; homeY = currY }
                               }
 
-                              if (currX == null || currY == null || homeX == null || homeY == null) {
-                                  FloatingService.inst?.updateHUDList(emptyList(), px, py, 0, 0, "Đang đọc GPS góc phải...")
+                              if (currX == null || currY == null) {
+                                  FloatingService.inst?.updateHUDList(emptyList(), px, py, 0, 0, "Đang đọc GPS Quả cầu...")
                                   delay(120); continue
                               }
 
                               val cX = currX!!
                               val cY = currY!!
-                              val hX = homeX!!
-                              val hY = homeY!!
                               val now = System.currentTimeMillis()
 
                               // Dọn dẹp danh sách ô đã đập sau 15s
@@ -359,77 +347,110 @@ jobs:
                                   if (now - itMined.next().value > 15000L) itMined.remove()
                               }
 
-                              // 2. GIỚI HẠN BÁN KÍNH 20 Ô SO VỚI GỐC KHỞI ĐẦU
-                              if (abs(cX - hX) > 20 || abs(cY - hY) > 20) {
-                                  targetQueue.clear()
-                                  isWaitingAtTile1 = false
-                                  val angle = atan2((hY - cY).toDouble(), (hX - cX).toDouble())
-                                  FloatingService.inst?.updateHUDList(emptyList(), px, py, cX, cY, "VƯỢT 20 Ô! Quay về Gốc ($hX, $hY)")
-                                  BotAccService.inst?.walkToward(joyX, joyY, angle, 200)
-                                  delay(220); continue
+                              // BƯỚC 3: QUÉT VÀ ĐỊNH VỊ 2 Ô TRONG GAME NẾU CHƯA CÓ
+                              if (tile1 == null || tile2 == null) {
+                                  val scanned = scanTwoTiles(scr, px, py, cX, cY)
+                                  if (tile1 == null && scanned.isNotEmpty()) tile1 = scanned[0]
+                                  if (tile2 == null && scanned.size > 1) tile2 = scanned[1]
+                                  currentStep = 1
+                                  isStandingStill = false
+                                  walkStartTime = 0L
                               }
 
-                              // 3. TỰ ĐỘNG QUÉT VÀ NẠP ĐỦ ĐÚNG 2 Ô VÀO HÀNG ĐỢI (Ô 1 & Ô 2)
-                              if (targetQueue.size < 2) {
-                                  val fresh = scanGridCells(scr, px, py, cX, cY, hX, hY)
-                                  for (f in fresh) {
-                                      if (!targetQueue.contains(f)) {
-                                          targetQueue.add(f)
-                                          if (targetQueue.size >= 2) break
-                                      }
-                                  }
-                              }
-
-                              // Cập nhật giao diện trực quan 2 ô
+                              // Cập nhật giao diện trực quan Ô 1 và Ô 2
                               updateVisualHUD(px, py, cX, cY, now)
 
-                              if (targetQueue.isEmpty()) {
+                              if (tile1 == null) {
                                   delay(200); continue
                               }
 
-                              // 4. MỤC TIÊU SỐ 1
-                              val target = targetQueue[0]
-                              val tX = target.first
-                              val tY = target.second
+                              // BƯỚC 4: XỬ LÝ Ô 1 (ĐẾN TÂM ĐỨNG 4S)
+                              if (currentStep == 1) {
+                                  val t1 = tile1!!
 
-                              // KIỂM TRA ĐÃ ĐỨNG ĐÚNG TỌA ĐỘ Ô 1 (cX == tX && cY == tY)
-                              if (cX == tX && cY == tY) {
-                                  if (!isWaitingAtTile1) {
-                                      isWaitingAtTile1 = true
-                                      arriveStartTime = now
+                                  // ĐÃ ĐỨNG ĐÚNG TỌA ĐỘ Ô 1 (cX == t1.first && cY == t1.second)
+                                  if (cX == t1.first && cY == t1.second) {
+                                      if (!isStandingStill) {
+                                          isStandingStill = true
+                                          standStartTime = now
+                                      }
+
+                                      val elapsed = now - standStartTime
+                                      // ĐỦ 4 GIÂY TẠI Ô 1: HOÀN TẤT, CHUYỂN SANG BƯỚC 5 (Ô 2)
+                                      if (elapsed >= 4000L) {
+                                          minedTiles[t1] = now
+                                          currentStep = 2 // Chuyển sang Ô 2
+                                          isStandingStill = false
+                                          walkStartTime = 0L
+                                          delay(50); continue
+                                      }
+
+                                      // TRONG 4 GIÂY: THẢ TAY HOÀN TOÀN ĐỨNG YÊN
+                                      delay(150); continue
+                                  } else {
+                                      // CHƯA ĐẾN TÂM Ô 1: BƯỚC TIẾP TỤC VÀO TÂM
+                                      isStandingStill = false
+                                      if (walkStartTime == 0L) walkStartTime = now
+                                      // Chống kẹt vật cản quá 5s
+                                      if (now - walkStartTime > 5000L) {
+                                          minedTiles[t1] = now
+                                          currentStep = 2
+                                          walkStartTime = 0L
+                                          delay(50); continue
+                                      }
+
+                                      val angle = atan2((t1.second - cY).toDouble(), (t1.first - cX).toDouble())
+                                      BotAccService.inst?.walkToward(joyX, joyY, angle, 150)
+                                      delay(180); continue
+                                  }
+                              }
+
+                              // BƯỚC 5: XỬ LÝ Ô 2 (ĐẾN TÂM ĐỨNG 4S)
+                              if (currentStep == 2) {
+                                  if (tile2 == null) {
+                                      // Không có ô 2 -> Reset để quét cặp mới
+                                      tile1 = null; currentStep = 1
+                                      delay(50); continue
                                   }
 
-                                  val elapsed = now - arriveStartTime
+                                  val t2 = tile2!!
 
-                                  // ĐÃ CHỜ ĐỦ 4 GIÂY: Ô 1 XONG -> XÓA Ô 1 (Ô 2 THÀNH Ô 1, XOAY VÒNG)
-                                  if (elapsed >= 4000L) {
-                                      minedTiles[target] = now
-                                      targetQueue.removeAt(0)
-                                      isWaitingAtTile1 = false
-                                      walkStartTime = 0L
-                                      delay(60); continue
+                                  // ĐÃ ĐỨNG ĐÚNG TỌA ĐỘ Ô 2 (cX == t2.first && cY == t2.second)
+                                  if (cX == t2.first && cY == t2.second) {
+                                      if (!isStandingStill) {
+                                          isStandingStill = true
+                                          standStartTime = now
+                                      }
+
+                                      val elapsed = now - standStartTime
+                                      // ĐỦ 4 GIÂY TẠI Ô 2: HOÀN TẤT CẢ 2 Ô -> RESET LẶP LẠI VÒNG TIẾP THEO
+                                      if (elapsed >= 4000L) {
+                                          minedTiles[t2] = now
+                                          tile1 = null
+                                          tile2 = null
+                                          currentStep = 1 // Quay lại Bước 3 & 4
+                                          isStandingStill = false
+                                          walkStartTime = 0L
+                                          delay(100); continue
+                                      }
+
+                                      // TRONG 4 GIÂY: THẢ TAY HOÀN TOÀN ĐỨNG YÊN
+                                      delay(150); continue
+                                  } else {
+                                      // CHƯA ĐẾN TÂM Ô 2: BƯỚC TIẾP TỤC VÀO TÂM
+                                      isStandingStill = false
+                                      if (walkStartTime == 0L) walkStartTime = now
+                                      if (now - walkStartTime > 5000L) {
+                                          minedTiles[t2] = now
+                                          tile1 = null; tile2 = null
+                                          currentStep = 1; walkStartTime = 0L
+                                          delay(50); continue
+                                      }
+
+                                      val angle = atan2((t2.second - cY).toDouble(), (t2.first - cX).toDouble())
+                                      BotAccService.inst?.walkToward(joyX, joyY, angle, 150)
+                                      delay(180); continue
                                   }
-
-                                  // ĐỨNG YÊN HOÀN TOÀN TRONG 4 GIÂY
-                                  delay(200); continue
-                              } else {
-                                  // CHƯA ĐẾN TÂM Ô 1: BƯỚC TỚI Ô 1
-                                  isWaitingAtTile1 = false
-                                  if (walkStartTime == 0L) walkStartTime = now
-
-                                  if (now - walkStartTime > 5000L) {
-                                      minedTiles[target] = now
-                                      targetQueue.removeAt(0)
-                                      walkStartTime = 0L
-                                      delay(60); continue
-                                  }
-
-                                  val dX = tX - cX
-                                  val dY = tY - cY
-                                  val angle = atan2(dY.toDouble(), dX.toDouble())
-
-                                  BotAccService.inst?.walkToward(joyX, joyY, angle, 150)
-                                  delay(180)
                               }
                           }
                       }
@@ -440,28 +461,41 @@ jobs:
                   return running
               }
 
-              // CẬP NHẬT HUD TRỰC QUAN Ô 1 VÀ Ô 2
+              // CẬP NHẬT GIAO DIỆN TRỰC QUAN Ô 1 VÀ Ô 2
               private fun updateVisualHUD(px: Float, py: Float, cX: Int, cY: Int, now: Long) {
                   val vList = mutableListOf<VisualTile>()
-                  for (i in 0 until targetQueue.size) {
-                      val item = targetQueue[i]
-                      val isAct = (i == 0)
 
+                  tile1?.let { t1 ->
+                      val isAct = (currentStep == 1)
                       val st = when {
-                          isAct && isWaitingAtTile1 -> {
-                              val rem = max(0.0, (4000L - (now - arriveStartTime)) / 1000.0)
-                              String.format("⛏ CHỜ 4S (%.1fs)", rem)
+                          isAct && isStandingStill -> {
+                              val rem = max(0.0, (4000L - (now - standStartTime)) / 1000.0)
+                              String.format("⛏ ĐỨNG 4S (%.1fs)", rem)
+                          }
+                          isAct -> "▶ ĐANG TỚI"
+                          else -> "✔ ĐÃ XONG"
+                      }
+                      vList.add(VisualTile(1, t1.first, t1.second, isAct, st))
+                  }
+
+                  tile2?.let { t2 ->
+                      val isAct = (currentStep == 2)
+                      val st = when {
+                          isAct && isStandingStill -> {
+                              val rem = max(0.0, (4000L - (now - standStartTime)) / 1000.0)
+                              String.format("⛏ ĐỨNG 4S (%.1fs)", rem)
                           }
                           isAct -> "▶ ĐANG TỚI"
                           else -> "⏳ CHỜ SẴN"
                       }
-                      vList.add(VisualTile(i + 1, item.first, item.second, isAct, st))
+                      vList.add(VisualTile(2, t2.first, t2.second, isAct, st))
                   }
-                  val banner = "GPS: ($cX, $cY) | Hàng đợi: ${targetQueue.size}/2 ô"
+
+                  val banner = "GPS: ($cX, $cY) | Bước: Đang làm Ô $currentStep"
                   FloatingService.inst?.updateHUDList(vList, px, py, cX, cY, banner)
               }
 
-              // OCR ĐỌC TỌA ĐỘ QUẢ ĐỊA CẦU Ở TRÊN CÙNG
+              // OCR ĐỌC TỌA ĐỘ: LUÔN LẤY DÒNG QUẢ ĐỊA CẦU Ở TRÊN CÙNG
               private fun extractCoordinates(scr: Bitmap): Pair<Int, Int>? {
                   try {
                       val startX = (sW * 0.70f).toInt().coerceIn(0, scr.width - 20)
@@ -526,8 +560,8 @@ jobs:
                   return matchCount >= 6
               }
 
-              // QUÉT CÁC Ô XUNG QUANH (LẤY TỐI ĐA 2 Ô GẦN NHẤT)
-              private fun scanGridCells(scr: Bitmap, px: Float, py: Float, cX: Int, cY: Int, hX: Int, hY: Int): List<Pair<Int, Int>> {
+              // BƯỚC 3: QUÉT VÀ ĐỊNH VỊ 2 Ô TRONG GAME (LẤY TỌA ĐỘ wX, wY)
+              private fun scanTwoTiles(scr: Bitmap, px: Float, py: Float, cX: Int, cY: Int): List<Pair<Int, Int>> {
                   val found = mutableListOf<Pair<Int, Int>>()
 
                   for (dy in -4..4) {
@@ -538,7 +572,6 @@ jobs:
                           val wY = cY + dy
 
                           if (minedTiles.containsKey(Pair(wX, wY))) continue
-                          if (abs(wX - hX) > 20 || abs(wY - hY) > 20) continue
 
                           val screenX = px + dx * tileSize
                           val screenY = py + dy * tileSize
@@ -550,6 +583,7 @@ jobs:
                           }
                       }
                   }
+                  // Sắp xếp ô gần nhân vật nhất lên trước
                   found.sortBy { abs(it.first - cX) + abs(it.second - cY) }
                   return found.take(2)
               }
@@ -629,7 +663,7 @@ jobs:
                   }
 
                   val headerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                  val titleTv = TextView(this).apply { text = "KHOBAU 2 Ô"; textSize = 11f; setTextColor(Color.parseColor("#9CA3AF")); setPadding(6, 0, 16, 0) }
+                  val titleTv = TextView(this).apply { text = "KHOBAU v7.0"; textSize = 11f; setTextColor(Color.parseColor("#9CA3AF")); setPadding(6, 0, 16, 0) }
                   val btnMinimize = Button(this).apply {
                       text = "▲ Thu"; textSize = 10f; setTextColor(Color.WHITE)
                       background = GradientDrawable().apply { cornerRadius = 12f; setColor(Color.parseColor("#4B5563")) }
@@ -643,13 +677,12 @@ jobs:
                   headerRow.addView(btnClose, LinearLayout.LayoutParams(65, 55))
 
                   val bStart = createItemBtn("▶ START AUTO", Color.parseColor("#059669"))
-                  val bHome = createItemBtn("🎯 ĐẶT LẠI GỐC", Color.parseColor("#4F46E5"))
                   val bJoy = createItemBtn("🕹 ĐẶT JOYSTICK", Color.parseColor("#0891B2"))
                   val bHudToggle = createItemBtn("👁 KHUNG: BẬT", Color.parseColor("#2563EB"))
 
                   val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 68).apply { topMargin = 8 }
                   menuCard.addView(headerRow)
-                  menuCard.addView(bStart, lp); menuCard.addView(bHome, lp); menuCard.addView(bJoy, lp); menuCard.addView(bHudToggle, lp)
+                  menuCard.addView(bStart, lp); menuCard.addView(bJoy, lp); menuCard.addView(bHudToggle, lp)
                   rootContainer.addView(menuCard, LinearLayout.LayoutParams(260, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                   val pRoot = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
@@ -675,8 +708,6 @@ jobs:
                       bStart.text = if (a) "⏹ STOP AUTO" else "▶ START AUTO"
                       (bStart.background as? GradientDrawable)?.setColor(if (a) Color.parseColor("#D97706") else Color.parseColor("#059669"))
                   }
-
-                  bHome.setOnClickListener { CaptureService.inst?.resetHomeManually() }
 
                   bJoy.setOnClickListener {
                       pJoy.x = (CaptureService.inst?.joyX?.toInt() ?: (sW / 2)) - 60
@@ -734,5 +765,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v6.8-Queue2-APK
+          name: KhobauBot-v7.0-DirectGPS-APK
           path: app/build/outputs/apk/debug/*.apk
