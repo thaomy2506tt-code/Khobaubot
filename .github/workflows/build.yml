@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 64; versionName '8.1' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 65; versionName '8.2' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -148,7 +148,6 @@ jobs:
               override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
               override fun onInterrupt() {}
 
-              // KÉO TOÀN TỐC MƯỢT MÀ: Giữ cần gạt liên tục
               fun walkToward(jx: Float, jy: Float, angle: Double, dMs: Long = 450L) {
                   val endX = jx + (125f * cos(angle)).toFloat()
                   val endY = jy + (125f * sin(angle)).toFloat()
@@ -236,7 +235,7 @@ jobs:
 
               private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-              // TỌA ĐỘ GPS CHẠY TRÊN LUỒNG ĐỘC LẬP
+              // TỌA ĐỘ GPS ĐƯỢC CẬP NHẬT TRÊN LUỒNG ĐỘC LẬP
               var currX: Int? = null
               var currY: Int? = null
               var homeX: Int? = null
@@ -247,7 +246,6 @@ jobs:
               var customTargetY: Int? = null
               var isNavigatingToCustom = false
 
-              // 2 Ô MỤC TIÊU VÒNG HIỆN TẠI & GỐI ĐẦU
               private var tile1: Pair<Int, Int>? = null
               private var tile2: Pair<Int, Int>? = null
               private var nextTile1: Pair<Int, Int>? = null
@@ -274,13 +272,13 @@ jobs:
                   sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.5f; joyY = sH * 0.64f
 
-                  val chId = "bot_v81"
+                  val chId = "bot_v82"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v8.1").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(164, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(164, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v8.2").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(165, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(165, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -351,8 +349,8 @@ jobs:
               fun stopCompletely() {
                   running = false
                   botJob?.cancel(); ocrJob?.cancel()
-                  try { mp?.stop() } catch (e: Exception) {}
-                  try { reader?.close() } catch (e: Exception) {}
+                  try { mp?.stop() } catch (_: Exception) {}
+                  try { reader?.close() } catch (_: Exception) {}
                   stopForeground(true); stopSelf()
               }
 
@@ -364,7 +362,7 @@ jobs:
                       val bmp = Bitmap.createBitmap(sW + pad / pl.pixelStride, sH, Bitmap.Config.ARGB_8888)
                       bmp.copyPixelsFromBuffer(buf)
                       lastBmp = if (pad > 0) Bitmap.createBitmap(bmp, 0, 0, sW, sH) else bmp
-                  } catch (e: Exception) {} finally { img.close() }
+                  } catch (_: Exception) {} finally { img.close() }
                   return lastBmp
               }
 
@@ -623,7 +621,7 @@ jobs:
                           lastRawText = "${candidates[0].second.first},${candidates[0].second.second}"
                           return candidates[0].second
                       }
-                  } catch (e: Exception) {}
+                  } catch (_: Exception) {}
                   return null
               }
 
@@ -700,12 +698,12 @@ jobs:
               }
 
               private fun killAppAndExit() {
-                  try { CaptureService.inst?.stopCompletely() } catch (e: Exception) {}
+                  try { CaptureService.inst?.stopCompletely() } catch (_: Exception) {}
                   try {
                       hudView?.let { if (it.parent != null) wm.removeView(it) }
                       if (::rootContainer.isInitialized && rootContainer.parent != null) wm.removeView(rootContainer)
                       if (::joyView.isInitialized && joyView.parent != null) wm.removeView(joyView)
-                  } catch (e: Exception) {}
+                  } catch (_: Exception) {}
                   stopSelf(); android.os.Process.killProcess(android.os.Process.myPid())
               }
 
@@ -751,7 +749,12 @@ jobs:
                   }
 
                   val headerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                  val titleTv = TextView(this).apply { text = "KHOBAU v8.1"; textSize = 10f; isFakeBoldText = true; setTextColor(Color.parseColor("#38BDF8")) }
+                  val titleTv = TextView(this).apply {
+                      text = "KHOBAU v8.2"
+                      textSize = 10f
+                      typeface = Typeface.DEFAULT_BOLD
+                      setTextColor(Color.parseColor("#38BDF8"))
+                  }
                   val btnMinimize = Button(this).apply {
                       text = "▲"; textSize = 9f; setTextColor(Color.WHITE)
                       background = GradientDrawable().apply { cornerRadius = 10f; setColor(Color.parseColor("#4B5563")) }
@@ -863,5 +866,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v8.1-FixBuild-APK
+          name: KhobauBot-v8.2-Fixed-APK
           path: app/build/outputs/apk/debug/*.apk
