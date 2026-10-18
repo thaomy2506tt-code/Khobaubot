@@ -35,7 +35,7 @@ jobs:
           plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
               namespace 'com.bot'; compileSdk 34
-              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 62; versionName '7.9' }
+              defaultConfig { applicationId 'com.bot'; minSdk 24; targetSdk 33; versionCode 63; versionName '8.0' }
               compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = '17' }
           }
@@ -236,17 +236,17 @@ jobs:
 
               private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-              // TỌA ĐỘ GPS ĐƯỢC CẬP NHẬT LIÊN TỤC TRONG LUỒNG NGẦM
-              @Volatile var currX: Int? = null
-              @Volatile var currY: Int? = null
-              @Volatile var homeX: Int? = null
-              @Volatile var homeY: Int? = null
-              @Volatile var lastRawText = ""
+              // TỌA ĐỘ GPS CHẠY TRÊN LUỒNG ĐỘC LẬP
+              var currX: Int? = null
+              var currY: Int? = null
+              var homeX: Int? = null
+              var homeY: Int? = null
+              var lastRawText = ""
 
-              // VỊ TRÍ CẦN DẪN VỀ KHẨN CẤP
-              @Volatile var customTargetX: Int? = null
-              @Volatile var customTargetY: Int? = null
-              @Volatile var isNavigatingToCustom = false
+              // VỊ TRÍ DẪN VỀ KHẨN CẤP
+              var customTargetX: Int? = null
+              var customTargetY: Int? = null
+              var isNavigatingToCustom = false
 
               // 2 Ô MỤC TIÊU VÒNG HIỆN TẠI & GỐI ĐẦU
               private var tile1: Pair<Int, Int>? = null
@@ -275,13 +275,13 @@ jobs:
                   sW = dm.widthPixels; sH = dm.heightPixels
                   joyX = sW * 0.5f; joyY = sH * 0.64f
 
-                  val chId = "bot_v79"
+                  val chId = "bot_v80"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val m = getSystemService(NotificationManager::class.java)
                       m?.createNotificationChannel(NotificationChannel(chId, "Bot", NotificationManager.IMPORTANCE_LOW))
                   }
-                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v7.9 Smooth").setSmallIcon(android.R.drawable.ic_media_play).build()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(162, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(162, n)
+                  val n = NotificationCompat.Builder(this, chId).setContentTitle("KhobauBot v8.0").setSmallIcon(android.R.drawable.ic_media_play).build()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(163, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(163, n)
               }
 
               @SuppressLint("WrongConstant")
@@ -300,7 +300,7 @@ jobs:
                   return START_STICKY
               }
 
-              // LUỒNG ĐỌC GPS QUẢ CẦU CHẠY NGẦM ĐỘC LẬP - KHÔNG LÀM KHỰNG BƯỚC ĐI CỦA BOT
+              // LUỒNG ĐỌC GPS QUẢ CẦU CHẠY NGẦM ĐỘC LẬP (KHÔNG LÀM KHỰNG BƯỚC ĐI)
               private fun startBackgroundOCR() {
                   ocrJob?.cancel()
                   ocrJob = CoroutineScope(Dispatchers.Default).launch {
@@ -352,8 +352,8 @@ jobs:
               fun stopCompletely() {
                   running = false
                   botJob?.cancel(); ocrJob?.cancel()
-                  try { mp?.stop() } catch (_: Exception) {}
-                  try { reader?.close() } catch (_: Exception) {}
+                  try { mp?.stop() } catch (e: Exception) {}
+                  try { reader?.close() } catch (e: Exception) {}
                   stopForeground(true); stopSelf()
               }
 
@@ -365,7 +365,7 @@ jobs:
                       val bmp = Bitmap.createBitmap(sW + pad / pl.pixelStride, sH, Bitmap.Config.ARGB_8888)
                       bmp.copyPixelsFromBuffer(buf)
                       lastBmp = if (pad > 0) Bitmap.createBitmap(bmp, 0, 0, sW, sH) else bmp
-                  } catch (_: Exception) {} finally { img.close() }
+                  } catch (e: Exception) {} finally { img.close() }
                   return lastBmp
               }
 
@@ -401,7 +401,7 @@ jobs:
                                   if (now - itMined.next().value > 15000L) itMined.remove()
                               }
 
-                              // 1. CHẾ ĐỘ DẪN VỀ GỐC: KÉO MƯỢT LIÊN TỤC KHÔNG GIẬT
+                              // 1. CHẾ ĐỘ DẪN VỀ GỐC
                               if (isNavigatingToCustom && customTargetX != null && customTargetY != null) {
                                   val tX = customTargetX!!
                                   val tY = customTargetY!!
@@ -416,7 +416,6 @@ jobs:
                                   } else {
                                       val angle = atan2(-(dY).toDouble(), dX.toDouble())
                                       FloatingService.inst?.updateHUDList(emptyList(), px, py, cX, cY, "▶ Đang về Gốc ($tX, $tY)...")
-                                      // Vuốt mượt 420ms, gối đầu liên tục sau 380ms
                                       BotAccService.inst?.walkToward(joyX, joyY, angle, 420L)
                                       delay(380L); continue
                                   }
@@ -468,11 +467,10 @@ jobs:
                                       val elapsed = now - standStartTime
                                       if (elapsed >= 4000L) {
                                           minedTiles[t1] = now
-                                          currentStep = 2 // Sang Ô 2
+                                          currentStep = 2
                                           isStandingStill = false
                                           delay(50); continue
                                       }
-                                      // ĐỨNG YÊN HOÀN TOÀN ĐẬP ĐÁ
                                       delay(120); continue
                                   } else {
                                       isStandingStill = false
@@ -569,7 +567,7 @@ jobs:
               private fun preprocessPixelFont(src: Bitmap): Bitmap {
                   val scale = 4
                   val w = src.width * scale; val h = src.height * scale
-                  val scaled = Bitmap.createScaledBitmap(src, w, h, false) // false = Nearest-Neighbor, giữ góc vuông pixel
+                  val scaled = Bitmap.createScaledBitmap(src, w, h, false)
                   val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                   val pixels = IntArray(w * h)
                   scaled.getPixels(pixels, 0, w, 0, 0, w, h)
@@ -605,7 +603,6 @@ jobs:
                               val txt = line.text
                               if (txt.contains(":") || txt.contains("Asia", true)) continue
 
-                              // Chuẩn hóa ký tự pixel bị OCR đọc nhầm
                               val normalized = txt.replace('O', '0').replace('o', '0').replace('D', '0')
                                   .replace('I', '1').replace('l', '1').replace('|', '1').replace('i', '1')
                                   .replace('S', '5').replace('s', '5').replace('B', '8')
@@ -627,7 +624,7 @@ jobs:
                           lastRawText = "${candidates[0].second.first},${candidates[0].second.second}"
                           return candidates[0].second
                       }
-                  } catch (_: Exception) {}
+                  } catch (e: Exception) {}
                   return null
               }
 
@@ -704,12 +701,12 @@ jobs:
               }
 
               private fun killAppAndExit() {
-                  try { CaptureService.inst?.stopCompletely() } catch (_: Exception) {}
+                  try { CaptureService.inst?.stopCompletely() } catch (e: Exception) {}
                   try {
                       if (hudView != null && hudView?.parent != null) wm.removeView(hudView)
                       if (::rootContainer.isInitialized && rootContainer.parent != null) wm.removeView(rootContainer)
                       if (::joyView.isInitialized && joyView.parent != null) wm.removeView(joyView)
-                  } catch (_: Exception) {}
+                  } catch (e: Exception) {}
                   stopSelf(); android.os.Process.killProcess(android.os.Process.myPid())
               }
 
@@ -740,7 +737,7 @@ jobs:
                   }
                   rootContainer.addView(miniBubble, LinearLayout.LayoutParams(85, 85))
 
-                  // MENU CARD THU NHỎ SIÊU GỌN (BỀ NGANG CHỈ 165DP)
+                  // MENU THU NHỎ SIÊU GỌN (160DP)
                   menuCard = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL; setPadding(10, 8, 10, 8)
                       background = GradientDrawable().apply { cornerRadius = 18f; setColor(Color.parseColor("#F21E1E24")); setStroke(2, Color.parseColor("#374151")) }
@@ -748,16 +745,18 @@ jobs:
 
                   fun createItemBtn(title: String, col: Int): Button {
                       return Button(this).apply {
-                          text = title; textSize = 10.5f; setTextColor(Color.WHITE); isAllCaps = false
+                          text = title; textSize = 10.5f; setTextColor(Color.WHITE)
+                          setAllCaps(false)
                           background = GradientDrawable().apply { cornerRadius = 12f; setColor(col) }
                           setPadding(6, 2, 6, 2)
                       }
                   }
 
                   val headerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                  val titleTv = TextView(this).apply { text = "KHOBAU v7.9"; textSize = 10f; isFakeBoldText = true; setTextColor(Color.parseColor("#38BDF8")) }
+                  val titleTv = TextView(this).apply { text = "KHOBAU v8.0"; textSize = 10f; isFakeBoldText = true; setTextColor(Color.parseColor("#38BDF8")) }
                   val btnMinimize = Button(this).apply {
                       text = "▲"; textSize = 9f; setTextColor(Color.WHITE)
+                      setAllCaps(false)
                       background = GradientDrawable().apply { cornerRadius = 10f; setColor(Color.parseColor("#4B5563")) }
                   }
                   val btnClose = Button(this).apply {
@@ -769,7 +768,7 @@ jobs:
                   headerRow.addView(btnClose, LinearLayout.LayoutParams(50, 44))
 
                   val bStart = createItemBtn("▶ START AUTO", Color.parseColor("#059669"))
-                  val bSaveHome = createItemBtn("📍 LƯU GỐC (HERE)", Color.parseColor("#2563EB"))
+                  val bSaveHome = createItemBtn("📍 LƯU GỐC", Color.parseColor("#2563EB"))
                   val bGoHome = createItemBtn("🚀 VỀ GỐC", Color.parseColor("#7C3AED"))
                   val bJoy = createItemBtn("🕹 ĐẶT JOYSTICK", Color.parseColor("#0891B2"))
                   val bHudToggle = createItemBtn("👁 KHUNG: BẬT", Color.parseColor("#374151"))
@@ -781,7 +780,7 @@ jobs:
                   menuCard.addView(bGoHome, lp)
                   menuCard.addView(bJoy, lp)
                   menuCard.addView(bHudToggle, lp)
-                  rootContainer.addView(menuCard, LinearLayout.LayoutParams(165, LinearLayout.LayoutParams.WRAP_CONTENT))
+                  rootContainer.addView(menuCard, LinearLayout.LayoutParams(160, LinearLayout.LayoutParams.WRAP_CONTENT))
 
                   pRoot = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
                       gravity = Gravity.TOP or Gravity.START; x = 20; y = 140
@@ -867,5 +866,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: KhobauBot-v7.9-CompactSmooth-APK
+          name: KhobauBot-v8.0-Compact-APK
           path: app/build/outputs/apk/debug/*.apk
