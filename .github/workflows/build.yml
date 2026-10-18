@@ -1,4 +1,4 @@
-name: Build KhobauBot APK
+name: Build KhobauBot1 APK
 
 on:
   push:
